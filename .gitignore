@@ -1,0 +1,17 @@
+# ========================================
+# Ignore specific folders and their content
+# ========================================
+
+C001_Mesh_files/
+E001_Simulations/
+I001_Results/
+F002_Experiments_data/
+F003_Experiments_frames_and_videos/
+I002_Videos/
+logs/
+
+# Ignore everything in J001_Results_Processing...
+J001_Results_Processing/*
+
+# ...but keep Python files in J001_Results_Processing
+!J001_Results_Processing/*.py

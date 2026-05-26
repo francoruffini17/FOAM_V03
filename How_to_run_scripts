@@ -1,0 +1,7 @@
+abq python A001_functions/abq_scriptV9.py
+python -m A001_functions.Reduce_resultsV5
+python -m A001_functions.Video_executor
+python -m A001_functions.Video_executor_multiple
+
+
+abq python A001_functions/abq_script_to_plot_V2.py

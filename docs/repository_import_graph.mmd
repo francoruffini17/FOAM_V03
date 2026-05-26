@@ -1,0 +1,204 @@
+flowchart LR
+  %% AST-derived local Python import graph. Generated output folders, caches, and node_modules were excluded.
+  subgraph sg_A001_functions["A001_functions"]
+    n001["A001_functions/Hex_5.py"]
+    n004["A001_functions/Old/Reduce_resultsV5_old.py"]
+    n005["A001_functions/Old/Reduce_resultsV5_old2.py"]
+    n006["A001_functions/Old/Reduce_resultsV5_old3_working.py"]
+    n007["A001_functions/Old/Reduce_resultsV5_old4.py"]
+    n008["A001_functions/Old/Reduce_resultsV5_old5.py"]
+    n009["A001_functions/Old/Video_functions_old.py"]
+    n010["A001_functions/Old/abq_inp_file_creator_old.py"]
+    n011["A001_functions/Old/abq_inp_file_creator_old_2.py"]
+    n012["A001_functions/Old/abq_inp_file_creator_old_3.py"]
+    n013["A001_functions/Read_resultsV5.py"]
+    n014["A001_functions/Reduce_resultsV5.py"]
+    n015["A001_functions/Video_executor.py"]
+    n016["A001_functions/Video_functions.py"]
+    n017["A001_functions/abq_inp_file_creator.py"]
+    n018["A001_functions/fem_stress_interpolation.py"]
+    n019["A001_functions/mesh_functions.py"]
+    n020["A001_functions/plot_mesh_functions.py"]
+  end
+  subgraph sg_Missing_local_looking_imports["Missing local-looking imports"]
+    n002["A001_functions/Hex_pack_funct.py"]
+    n003["A001_functions/Old/Read_resultsV5.py"]
+  end
+  subgraph sg_A001_tests["A001_tests"]
+    n021["A001_tests/test_create_pkl_j1.py"]
+    n022["A001_tests/test_create_pkl_j1_sim7500.py"]
+    n023["A001_tests/test_create_pkl_j2.py"]
+    n024["A001_tests/test_create_pkl_t1_sim.py"]
+    n025["A001_tests/test_fem_stress_interpolation.py"]
+    n026["A001_tests/test_hexagonal_mesh_2.py"]
+    n027["A001_tests/test_hexagonal_mesh_2_plot.py"]
+    n028["A001_tests/test_mapping.py"]
+  end
+  subgraph sg_B001_Mesh_creator["B001_Mesh_creator"]
+    n029["B001_Mesh_creator/Mesh_creator_hex_pack_2.py"]
+    n030["B001_Mesh_creator/Mesh_creator_hex_pack_2_Test.py"]
+    n031["B001_Mesh_creator/Mesh_creator_random.py"]
+  end
+  subgraph sg_D001_Input_files_creator["D001_Input_files_creator"]
+    n032["D001_Input_files_creator/SIM_000_inp_creator.py"]
+    n033["D001_Input_files_creator/SIM_001_inp_creator.py"]
+    n034["D001_Input_files_creator/SIM_1000_inp_creator.py"]
+    n035["D001_Input_files_creator/SIM_100_inp_creator.py"]
+    n036["D001_Input_files_creator/SIM_1100_inp_creator.py"]
+    n037["D001_Input_files_creator/SIM_1200_inp_creator.py"]
+    n038["D001_Input_files_creator/SIM_1210_inp_creator.py"]
+    n039["D001_Input_files_creator/SIM_1300_inp_creator.py"]
+    n040["D001_Input_files_creator/SIM_1310_inp_creator.py"]
+    n041["D001_Input_files_creator/SIM_1320_inp_creator.py"]
+    n042["D001_Input_files_creator/SIM_2000_inp_creator.py"]
+    n043["D001_Input_files_creator/SIM_3000_inp_creator.py"]
+    n044["D001_Input_files_creator/SIM_3000_inp_creator_OnLY_9.py"]
+    n045["D001_Input_files_creator/SIM_4000_inp_creator.py"]
+    n046["D001_Input_files_creator/SIM_5000_inp_creator.py"]
+    n047["D001_Input_files_creator/SIM_5000_inp_creator_test.py"]
+    n048["D001_Input_files_creator/SIM_6000_inp_creator.py"]
+    n049["D001_Input_files_creator/SIM_9000_inp_creator.py"]
+    n050["D001_Input_files_creator/SIM_9001_inp_creator.py"]
+    n051["D001_Input_files_creator/SIM_9002_inp_creator.py"]
+    n052["D001_Input_files_creator/SIM_9003_inp_creator.py"]
+    n053["D001_Input_files_creator/SIM_9004_inp_creator.py"]
+    n054["D001_Input_files_creator/SIM_9005_inp_creator.py"]
+    n055["D001_Input_files_creator/SIM_9998_inp_creator.py"]
+    n056["D001_Input_files_creator/SIM_9999_inp_creator.py"]
+  end
+  subgraph sg_F001_Video_properties_files["F001_Video_properties_files"]
+    n057["F001_Video_properties_files/Video_properties0031.py"]
+    n058["F001_Video_properties_files/Video_properties0031_T.py"]
+    n059["F001_Video_properties_files/Video_properties0032.py"]
+    n060["F001_Video_properties_files/Video_properties0032_Hex_10.py"]
+    n061["F001_Video_properties_files/Video_properties0032_Hex_100.py"]
+    n062["F001_Video_properties_files/Video_properties0032_Hex_101.py"]
+    n063["F001_Video_properties_files/Video_properties0032_Hex_2.py"]
+    n064["F001_Video_properties_files/Video_properties0032_Hex_3.py"]
+    n065["F001_Video_properties_files/Video_properties0032_Hex_30.py"]
+    n066["F001_Video_properties_files/Video_properties0032_Hex_31.py"]
+    n067["F001_Video_properties_files/Video_properties0032_Hex_4.py"]
+    n068["F001_Video_properties_files/Video_properties0032_Hex_40.py"]
+    n069["F001_Video_properties_files/Video_properties0032_Hex_5.py"]
+    n070["F001_Video_properties_files/Video_properties0032_Hex_6.py"]
+    n071["F001_Video_properties_files/Video_properties0032_Hex_7.py"]
+    n072["F001_Video_properties_files/Video_properties0032_Hex_8.py"]
+    n073["F001_Video_properties_files/Video_properties0032_Hex_9.py"]
+    n074["F001_Video_properties_files/Video_properties0032_Hex_9998 copy.py"]
+    n075["F001_Video_properties_files/Video_properties0032_Hex_9998.py"]
+    n076["F001_Video_properties_files/Video_properties_2000.py"]
+    n077["F001_Video_properties_files/Video_properties_2001.py"]
+    n078["F001_Video_properties_files/Video_properties_2002 copy.py"]
+    n079["F001_Video_properties_files/Video_properties_2002.py"]
+    n080["F001_Video_properties_files/Video_properties_2003.py"]
+    n081["F001_Video_properties_files/Video_properties_2004.py"]
+    n082["F001_Video_properties_files/Video_properties_2005.py"]
+    n083["F001_Video_properties_files/Video_properties_2006.py"]
+    n084["F001_Video_properties_files/Video_properties_2007.py"]
+    n085["F001_Video_properties_files/Video_properties_2008.py"]
+    n086["F001_Video_properties_files/Video_properties_2010.py"]
+  end
+  subgraph sg_J001_important_functions["J001_important_functions"]
+    n087["J001_important_functions/plot_mesh.py"]
+  end
+  n001 --> n020
+  n004 -.-> n003
+  n004 --> n019
+  n005 -.-> n002
+  n005 -.-> n003
+  n005 --> n019
+  n006 -.-> n002
+  n006 -.-> n003
+  n006 --> n019
+  n007 -.-> n002
+  n007 -.-> n003
+  n007 --> n019
+  n008 -.-> n002
+  n008 -.-> n003
+  n008 --> n019
+  n009 -.-> n002
+  n010 --> n019
+  n011 --> n019
+  n012 --> n019
+  n014 --> n001
+  n014 --> n013
+  n014 --> n018
+  n014 --> n019
+  n015 --> n016
+  n016 --> n018
+  n016 --> n019
+  n017 --> n001
+  n017 --> n019
+  n020 --> n001
+  n021 --> n001
+  n021 --> n014
+  n021 --> n018
+  n022 --> n001
+  n022 --> n014
+  n023 --> n014
+  n024 --> n014
+  n024 --> n019
+  n025 --> n018
+  n026 --> n001
+  n027 --> n001
+  n028 --> n001
+  n029 --> n001
+  n030 --> n001
+  n031 --> n001
+  n032 --> n017
+  n033 --> n017
+  n034 --> n017
+  n035 --> n017
+  n036 --> n017
+  n037 --> n017
+  n038 --> n017
+  n039 --> n017
+  n040 --> n017
+  n041 --> n017
+  n042 --> n017
+  n043 --> n017
+  n044 --> n017
+  n045 --> n017
+  n046 --> n017
+  n047 --> n017
+  n048 --> n017
+  n049 --> n017
+  n050 --> n017
+  n051 --> n017
+  n052 --> n017
+  n053 --> n017
+  n054 --> n017
+  n055 --> n017
+  n056 --> n017
+  n057 --> n016
+  n058 --> n016
+  n059 --> n016
+  n060 --> n016
+  n061 --> n016
+  n062 --> n016
+  n063 --> n016
+  n064 --> n016
+  n065 --> n016
+  n066 --> n016
+  n067 --> n016
+  n068 --> n016
+  n069 --> n016
+  n070 --> n016
+  n071 --> n016
+  n072 --> n016
+  n073 --> n016
+  n074 --> n016
+  n075 --> n016
+  n076 --> n016
+  n077 --> n016
+  n078 --> n016
+  n079 --> n016
+  n080 --> n016
+  n081 --> n016
+  n082 --> n016
+  n083 --> n016
+  n084 --> n016
+  n085 --> n016
+  n086 --> n016
+  n087 --> n020
+

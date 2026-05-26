@@ -1,0 +1,300 @@
+================================================================================
+PKL FILES STRUCTURE — I001_Results/
+Naming convention: DATA_PICK_{SIM_ID}_{TYPE}.pkl
+Reference: sim 3000 (75 time steps)
+================================================================================
+
+All time-series arrays have length 75 (one entry per simulation frame).
+"t" is always a list[float] of length 75 (time values).
+
+INDEXING CONVENTIONS:
+  - Abaqus nodes/elements (files A, B, C, D):  keys are STRINGS starting at '1'  (1-based)
+  - Hex mesh nodes/elements (file C2):          keys are STRINGS starting at '1'  (1-based)
+  - Interpolation nodes (files T1, T2):         keys are INTEGERS starting at  1  (1-based)
+  - Bars / force-chains (files H1, I1, J1, K1): keys are INTEGERS starting at  0  (0-based)
+  - H1/I1/J1/K1 nodes list:                    list indices 0-based, but nodes[i] is a dict
+                                                keyed by time-step index 0..74 (0-based)
+  - K1 nodes_id list:                          raw Abaqus node IDs (start from 2 in sim 3000,
+                                                not necessarily 0 or 1 — Abaqus-original IDs)
+
+================================================================================
+FILE A  — DATA_PICK_{SIM}_A.pkl
+  Raw Abaqus reaction forces and displacements (nested by part/node, per time step)
+  dict {
+    't'   : list[float]  len=75        — time values
+    'RF2' : dict {
+              part_name (str, e.g. 'PERN-9999997') -> dict {
+                node_id (str, 1-based) -> list[float]  len=75   — RF2 values over time
+              }
+            }
+    'U2'  : dict {
+              part_name (str) -> dict {
+                node_id (str, 1-based) -> list[float]  len=75   — U2 displacement over time
+              }
+            }
+  }
+
+FILE A2 — DATA_PICK_{SIM}_A2.pkl
+  Same data as A but flattened: part-level dict only (node level merged/summed).
+  dict {
+    't'   : list[float]  len=75
+    'RF2' : dict { part_name (str) -> list[float] len=75 }
+    'U2'  : dict { part_name (str) -> list[float] len=75 }
+  }
+
+FILE B  — DATA_PICK_{SIM}_B.pkl
+  Abaqus element stresses (integration-point values, per element, per time step).
+  dict {
+    't'   : list[float]  len=75
+    'S11' : dict { elem_id (str, 1-based) -> list[list[float]]  — [time_step][int_point] }
+    'S12' : dict { elem_id (str, 1-based) -> list[list[float]] }
+    'S22' : dict { elem_id (str, 1-based) -> list[list[float]] }
+  }
+
+FILE C  — DATA_PICK_{SIM}_C.pkl
+  Abaqus node coordinates over time.
+  dict {
+    't'     : list[float]  len=75
+    'COOR1' : dict { node_id (str, 1-based) -> list[float] len=75 }   — x-coordinate
+    'COOR2' : dict { node_id (str, 1-based) -> list[float] len=75 }   — y-coordinate
+  }
+
+FILE C2 — DATA_PICK_{SIM}_C2.pkl
+  Hex mesh topology + nodal positions + adjacency + barycenters + normals over time.
+  dict {
+    't'           : list[float]  len=75
+    'nodes_time'  : list[dict]  len=75        — one dict per time step
+                      { node_id (str, 1-based) -> tuple(x, y) }
+    'elements'    : dict { elem_id (str, 1-based) -> list[int]  — node IDs (str-based, mixed) }
+                      triangles: 3 nodes; quads: 4 nodes
+    'adjacency'   : dict { elem_id (str, 1-based) -> list[str]  — adjacent element IDs }
+    'baricenters' : dict { elem_id (str, 1-based) -> ndarray shape=(75, 2) — [x,y] per time step }
+    'normals'     : list[dict]  len=75        — one dict per time step
+                      { elem_id (str) -> normal vector }
+  }
+
+FILE D  — DATA_PICK_{SIM}_D.pkl
+  Interpolated stresses at hex mesh element centroids over time.
+  dict {
+    't'        : list[float]  len=75
+    'stresses' : dict { elem_id (str, 1-based) -> list[tuple(S11, S22)]  len=75 }
+  }
+
+FILE T1_{MESH_ID} — DATA_PICK_{SIM}_T1_{MESH_ID}.pkl
+  Triangulation-based interpolation data with area weights.
+  dict {
+    't'                        : list[float]  len=75
+    'nodes'                    : list[dict]  len=75       — one dict per time step
+                                   { node_id (int, 1-based) -> tuple(x, y, flag) }
+    'elements'                 : dict { elem_id (int, 1-based) -> list[int, 3]  — node IDs (0-based!) }
+                                   NOTE: element node indices inside the list are 0-based
+    'elements_area'            : dict { elem_id (int, 1-based) -> dict { t_idx (int, 0-based) -> float } }
+    'elements_area_normalized' : dict { elem_id (int, 1-based) -> dict { t_idx (int, 0-based) -> float } }
+  }
+
+FILE T2_{MESH_ID} — DATA_PICK_{SIM}_T2_{MESH_ID}.pkl
+  Statistical summary + geometric/kinematic analysis of the T1 triangulation mesh.
+  dict {
+    't'              : list[float]  len=75
+    'time_variant'   : dict {
+                         'areas'            : dict { 'min','max','mean','std' -> list[float] len=75 }
+                         'normalized_areas' : dict { 'min','max','mean','std' -> list[float] len=75 }
+                       }
+    'time_invariant' : dict {
+                         'areas'            : dict { elem_id (int,1-based) ->
+                                               dict { 'min','max','mean','std' -> float } }
+                         'normalized_areas' : dict { elem_id (int,1-based) ->
+                                               dict { 'min','max','mean','std' -> float } }
+                       }
+    'general_information' : dict {
+                              'n_elements'           : int
+                              'area_global_min'      : float
+                              'area_global_max'      : float
+                              'norm_area_global_min' : float
+                              'norm_area_global_max' : float
+                            }
+    'eta'        : list[float]  len=75   — mesh regularity index per timestep
+                     eta(ti) = 1 - std(norm_area at ti) / std_i
+                     std_i = (1/2) * sqrt(n_elems / (n_elems - 1))
+    'edge_sizes' : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> list[float, 3]  — [l1, l2, l3] }
+                   }
+                   Edges defined as: n1→n2 (l1), n2→n3 (l2), n3→n1 (l3)
+                   (node indices inside 'elements' are 0-based, +1 to look up 'nodes')
+    'q'          : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> float }
+                   }
+                   Mesh quality: q = 4*sqrt(3)*A / (l1^2 + l2^2 + l3^2)
+                   q=1 for equilateral triangle, q<1 otherwise
+    'epsilon'    : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> list[float, 3]  — [eps1, eps2, eps3] }
+                   }
+                   Edge strains: epsi(ti) = (li(ti) - li(0)) / li(0)
+    'F'          : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> list[list[float], 2x2] }
+                   }
+                   Deformation gradient F = dx/dX (2x2 matrix)
+                   Computed as: F = [x2-x1 | x3-x1] @ [X2-X1 | X3-X1]^{-1}
+                   where X are reference coords (t=0) and x are current coords (t=ti)
+    'shear'      : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> float }
+                   }
+                   SHEAR = 1/2 * trace(F^T * F)  (half-trace of right Cauchy-Green tensor)
+    'gle'        : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> float }
+                   }
+                   Green-Lagrange strain energy: GLE = trace(E)
+                   where E = 1/2 * (F^T * F - I)
+                   Note: GLE = shear - 1  (GLE=0 at reference config F=I)
+    'shear_mean' : list[float]  len=75   — mean of shear across all elements per timestep
+                     shear_mean[ti] = mean_e( 1/2 * trace(F_e^T * F_e) )
+    'gle_mean'   : list[float]  len=75   — mean of GLE across all elements per timestep
+                     gle_mean[ti] = mean_e( trace(E_e) )
+    'edi'        : dict { elem_id (int, 1-based) ->
+                     dict { t_idx (int, 0-based) -> float }
+                   }
+                   Edge deformation index: EDI = 1/3 * (|l1t/l10| + |l2t/l20| + |l3t/l30|)
+                   where li0 is the edge length at t=0 and lit is the edge length at time ti
+                   EDI=1 at reference config, EDI>1 on average elongation, EDI<1 on contraction
+    'edi_mean'   : list[float]  len=75   — mean of EDI across all elements per timestep
+                     edi_mean[ti] = mean_e( 1/3*(|l1t/l10|+|l2t/l20|+|l3t/l30|) )
+  }
+
+================================================================================
+FILE H1_{MESH_ID} — DATA_PICK_{SIM}_H1_{MESH_ID}.pkl
+  Force-chain bars: geometry, normals, and stress resultants along each bar over time.
+  (H = horizontal direction bars; MESH_ID e.g. 2000, 2001)
+  dict {
+    't'                : list[float]  len=75
+    'nodes'            : list[dict]  len=8571 (one dict per node)
+                           { t_idx (int, 0-based, 0..74) -> node_data }
+    'bars'             : dict { bar_id (int, 0-based) ->
+                           dict { t_idx (int, 0-based, 0..74) ->
+                             dict { 'normals': list[tuple(nx, ny)],
+                                    'SS'     : list[tuple(S11, S22, S12)] }
+                           }
+                         }
+    'bars_connectivity': dict { bar_id (int, 0-based) -> list[tuple(node_a, node_b)] }
+                           node indices are 0-based
+  }
+
+FILE H2_{MESH_ID} — DATA_PICK_{SIM}_H2_{MESH_ID}.pkl
+  Tension/compression network graphs (NetworkX) for horizontal bars per time step.
+  dict {
+    't'          : list[float]  len=75
+    'tension'    : dict { t_idx (int, 0-based) -> networkx.Graph }
+    'compression': dict { t_idx (int, 0-based) -> networkx.Graph }
+  }
+
+FILE H3_BFS_{MESH_ID} — DATA_PICK_{SIM}_H3_BFS_{MESH_ID}.pkl
+  Global efficiency (BFS-based) for horizontal force chains per time step.
+  dict {
+    't'           : list[float]  len=75
+    'global_ef_t' : list[float64]  len=75   — efficiency in tension network
+    'global_ef_c' : list[float64]  len=75   — efficiency in compression network
+  }
+
+================================================================================
+FILE I1_{MESH_ID} — DATA_PICK_{SIM}_I1_{MESH_ID}.pkl
+  Same structure as H1 but for a denser interpolation mesh (59526 bars, 31874 nodes).
+  dict {
+    't'                : list[float]  len=75
+    'nodes'            : list[dict]  len=31874
+                           { t_idx (int, 0-based) -> node_data }
+    'bars'             : dict { bar_id (int, 0-based) -> dict { t_idx -> bar_data } }
+    'bars_connectivity': dict { bar_id (int, 0-based) -> list[tuple(node_a, node_b)] }
+  }
+
+FILE I2_{MESH_ID} — DATA_PICK_{SIM}_I2_{MESH_ID}.pkl
+  Same structure as H2 (NetworkX tension/compression graphs) for I-mesh bars.
+  dict {
+    't'          : list[float]  len=75
+    'tension'    : dict { t_idx (int, 0-based) -> networkx.Graph }
+    'compression': dict { t_idx (int, 0-based) -> networkx.Graph }
+  }
+
+FILE I3_BFS_{MESH_ID} — DATA_PICK_{SIM}_I3_BFS_{MESH_ID}.pkl
+  Same structure as H3_BFS for I-mesh bars.
+  dict {
+    't'           : list[float]  len=75
+    'global_ef_t' : list[float64]  len=75
+    'global_ef_c' : list[float64]  len=75
+  }
+
+================================================================================
+FILE J1_{MESH_ID} — DATA_PICK_{SIM}_J1_{MESH_ID}.pkl
+  Same structure as H1 but for diagonal/other direction bars (2051 nodes).
+  bars_connectivity entries contain multiple node pairs per bar (sub-segments).
+  dict {
+    't'                : list[float]  len=75
+    'nodes'            : list[dict]  len=2051
+    'bars'             : dict { bar_id (int, 0-based) -> dict { t_idx -> bar_data } }
+    'bars_connectivity': dict { bar_id (int, 0-based) -> list[tuple(node_a, node_b), ...] }
+                           NOTE: multiple segments per bar (e.g. (0,276),(276,277),...)
+  }
+
+FILE J2_{MESH_ID} — DATA_PICK_{SIM}_J2_{MESH_ID}.pkl
+  Same structure as H2 (NetworkX graphs) for J-direction bars.
+
+FILE J3_BFS_{MESH_ID} — DATA_PICK_{SIM}_J3_BFS_{MESH_ID}.pkl
+  Same structure as H3_BFS for J-direction bars.
+
+================================================================================
+FILE K1_{MESH_ID} — DATA_PICK_{SIM}_K1_{MESH_ID}.pkl
+  Extended bar data: includes original Abaqus node IDs and stress per node over time.
+  (31874 nodes, 59526 bars — same mesh as I1 but with extra fields)
+  dict {
+    't'                : list[float]  len=75
+    'nodes'            : list[dict]  len=31874
+                           { t_idx (int, 0-based) -> node_data }
+    'nodes_id'         : list[int]  len=31874   — original Abaqus node IDs (NOT 0 or 1 based;
+                                                   raw Abaqus IDs, e.g. first entry = 2)
+    'nodes_stress'     : list[dict]  len=75      — one dict per time step
+                           { node_idx (int, 0-based) -> stress_value }
+    'bars'             : dict { bar_id (int, 0-based) ->
+                           dict { t_idx (int, 0-based) ->
+                             dict { 'normals': list[tuple], 'SS': list[tuple] }
+                           }
+                         }
+    'bars_connectivity': dict { bar_id (int, 0-based) -> list[tuple(node_a, node_b)] }
+                           node indices are 0-based
+    'bars_meth2'       : dict { bar_id (int, 0-based) ->
+                           dict { t_idx (int, 0-based) -> float }  — alternative stress measure
+                         }
+  }
+
+FILE K2_{MESH_ID} — DATA_PICK_{SIM}_K2_{MESH_ID}.pkl
+  Same structure as H2/I2 (NetworkX tension/compression graphs) for K-mesh bars.
+
+FILE K3_BFS_{MESH_ID} — DATA_PICK_{SIM}_K3_BFS_{MESH_ID}.pkl
+  Same structure as H3_BFS/I3_BFS for K-mesh bars.
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+Suffix  | Keys                                              | Notes
+--------|---------------------------------------------------|----------------------
+A       | t, RF2, U2                                        | nested part->node->time
+A2      | t, RF2, U2                                        | flat part->time
+B       | t, S11, S12, S22                                  | elem->time->int_pts
+C       | t, COOR1, COOR2                                   | node->time coords
+C2      | t, nodes_time, elements, adjacency,               | hex mesh topology
+        |   baricenters, normals                            |
+D       | t, stresses                                       | elem->(S11,S22) per t
+T1      | t, nodes, elements, elements_area,                | triangulation interp
+        |   elements_area_normalized                        | has MESH_ID in name
+T2      | t, time_variant, time_invariant,                  | triangulation stats +
+        |   general_information, eta,                       | geometry/kinematics
+        |   edge_sizes, q, epsilon, F,                      | has MESH_ID in name
+        |   shear, gle,                                     |
+        |   shear_mean, gle_mean,                           |
+        |   edi, edi_mean                                   |
+H1/J1/  | t, nodes, bars, bars_connectivity                 | bar geometry+stress
+I1      |                                                   |
+K1      | t, nodes, nodes_id, nodes_stress, bars,           | bar + Abaqus IDs
+        |   bars_connectivity, bars_meth2                   |
+H2/I2/  | t, tension, compression                           | NetworkX graphs/t
+J2/K2   |                                                   |
+H3/I3/  | t, global_ef_t, global_ef_c                       | scalar efficiency/t
+J3/K3   |                                                   |
+================================================================================
