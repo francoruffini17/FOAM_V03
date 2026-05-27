@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from A001_functions.plot_mesh_functions import (
     plot_mesh_json,
     plot_graph_mesh,
+    plot_graph_json_with_source,
     plot_mesh_json_and_graph,
     plot_mesh_json_periodic,
 )
@@ -15,9 +16,9 @@ from A001_functions.plot_mesh_functions import (
 # CLI
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    plot_mesh_json_and_graph(
-        "C001_Mesh_files/A2000_hexagonal_mesh.mesh.json",
+    plot_graph_json_with_source(
         "C001_Mesh_files/A3000_K2002.gridhex.json",
+        overlay_mesh=True,
         boundary_only=False,
         show=False,
     )

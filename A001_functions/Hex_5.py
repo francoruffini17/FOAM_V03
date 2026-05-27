@@ -903,6 +903,28 @@ def write_graph_json(
     return filename
 
 
+def _plot_graph_json_from_source(
+    mesh_file: str,
+    graph_file: str,
+    *,
+    overlay_mesh: bool = True,
+    boundary_only: bool = False,
+    show_nodes_graph: bool = True,
+) -> None:
+    """Plot a graph/grid/gridhex JSON file after it is created."""
+    from A001_functions.plot_mesh_functions import plot_graph_json_with_source
+
+    plot_graph_json_with_source(
+        graph_file,
+        source_mesh_path=mesh_file,
+        overlay_mesh=overlay_mesh,
+        boundary_only=boundary_only,
+        show_nodes_graph=show_nodes_graph,
+        show=False,
+    )
+    plt.show()
+
+
 def create_grid_json(
     mesh_file: str,
     output_path: str,
@@ -910,6 +932,10 @@ def create_grid_json(
     grid_n: int,
     grid_m: int,
     grid_remove_edge_nodes: bool = True,
+    show_plot: bool = False,
+    overlay_mesh: bool = True,
+    boundary_only: bool = False,
+    show_nodes_graph: bool = True,
 ) -> GraphMeshData:
     """Create a Cartesian sampling grid from a ``*.mesh.json`` source file."""
     payload, _ = _mesh_source_metadata(mesh_file)
@@ -922,7 +948,7 @@ def create_grid_json(
         hole_radii=_hole_radii_from_mesh_payload(payload),
         remove_edge_nodes=grid_remove_edge_nodes,
     )
-    write_graph_json(
+    graph_file = write_graph_json(
         grid,
         output_path,
         graph_type="grid",
@@ -935,6 +961,14 @@ def create_grid_json(
             "grid_remove_edge_nodes": grid_remove_edge_nodes,
         },
     )
+    if show_plot:
+        _plot_graph_json_from_source(
+            mesh_file,
+            graph_file,
+            overlay_mesh=overlay_mesh,
+            boundary_only=boundary_only,
+            show_nodes_graph=show_nodes_graph,
+        )
     return grid
 
 
@@ -946,6 +980,10 @@ def create_gridhex_json(
     grid_remove_edge_nodes: bool = True,
     gridhex_pointy_top: bool = True,
     delete_gridhex_isolated_bars: bool = False,
+    show_plot: bool = False,
+    overlay_mesh: bool = True,
+    boundary_only: bool = False,
+    show_nodes_graph: bool = True,
 ) -> GraphMeshData:
     """Create a hexagonal sampling grid from a ``*.mesh.json`` source file."""
     payload, _ = _mesh_source_metadata(mesh_file)
@@ -959,7 +997,7 @@ def create_gridhex_json(
         remove_edge_nodes=grid_remove_edge_nodes,
         delete_isolated_bars=delete_gridhex_isolated_bars,
     )
-    write_graph_json(
+    graph_file = write_graph_json(
         gridhex,
         output_path,
         graph_type="gridhex",
@@ -973,6 +1011,14 @@ def create_gridhex_json(
             "delete_gridhex_isolated_bars": delete_gridhex_isolated_bars,
         },
     )
+    if show_plot:
+        _plot_graph_json_from_source(
+            mesh_file,
+            graph_file,
+            overlay_mesh=overlay_mesh,
+            boundary_only=boundary_only,
+            show_nodes_graph=show_nodes_graph,
+        )
     return gridhex
 
 
@@ -986,6 +1032,10 @@ def create_graph_json(
     extra_rows_bottom: int = 0,
     extra_rows_top: int = 0,
     extend_random: bool = True,
+    show_plot: bool = False,
+    overlay_mesh: bool = True,
+    boundary_only: bool = False,
+    show_nodes_graph: bool = True,
 ) -> GraphMeshData:
     """Create a Voronoi graph JSON file from a ``*.mesh.json`` source file."""
     payload, generator = _mesh_source_metadata(mesh_file)
@@ -999,7 +1049,7 @@ def create_graph_json(
         extend_random=extend_random,
     )
     graph = generator.generate_graph_mesh(graph_characteristic_distance, centers=centers)
-    write_graph_json(
+    graph_file = write_graph_json(
         graph,
         output_path,
         graph_type="graph",
@@ -1015,6 +1065,14 @@ def create_graph_json(
             "extend_random": extend_random,
         },
     )
+    if show_plot:
+        _plot_graph_json_from_source(
+            mesh_file,
+            graph_file,
+            overlay_mesh=overlay_mesh,
+            boundary_only=boundary_only,
+            show_nodes_graph=show_nodes_graph,
+        )
     return graph
 
 
@@ -4028,6 +4086,7 @@ def create_hexagonal_mesh_2(
     export_mesh: bool = True,
     export_vtk: bool = True,
     show_plot: bool = False,
+    show_periodic_matching: bool = False,
     elements_around_hole: int = 24,
     mesh_size_factor: float = 1.0,
     allow_cut_left: bool = True,
@@ -4146,10 +4205,23 @@ def create_hexagonal_mesh_2(
             export_mesh_vtk_from_json(mesh_json)
 
     # --- plotting --------------------------------------------------------------
+    show_any_plot = False
     if show_plot:
         generator.plot_mesh(mesh, show_nodes=True, show_elements=True,
                             show_holes=True, highlight_hole_boundary=True)
         generator.plot_node_labels(mesh, show_label=True)
+        show_any_plot = True
+
+    if show_periodic_matching:
+        if export_mesh:
+            from A001_functions.plot_mesh_functions import plot_mesh_json_periodic
+
+            plot_mesh_json_periodic(mesh_json, show=False)
+            show_any_plot = True
+        else:
+            warnings.warn("show_periodic_matching requires export_mesh=True")
+
+    if show_any_plot:
         plt.show()
 
     print(
@@ -5691,6 +5763,7 @@ def create_random_mesh(
     export_mesh: bool = True,
     export_vtk: bool = True,
     show_plot: bool = False,
+    show_periodic_matching: bool = False,
     elements_around_hole: int = 24,
     mesh_size_factor: float = 1.0,
     allow_cut_left: bool = True,
@@ -5821,10 +5894,23 @@ def create_random_mesh(
             export_mesh_vtk_from_json(mesh_json)
 
     # --- plotting ----------------------------------------------------------
+    show_any_plot = False
     if show_plot:
         generator.plot_mesh(mesh, show_nodes=True, show_elements=True,
                             show_holes=True, highlight_hole_boundary=True)
         generator.plot_node_labels(mesh, show_label=True)
+        show_any_plot = True
+
+    if show_periodic_matching:
+        if export_mesh:
+            from A001_functions.plot_mesh_functions import plot_mesh_json_periodic
+
+            plot_mesh_json_periodic(mesh_json, show=False)
+            show_any_plot = True
+        else:
+            warnings.warn("show_periodic_matching requires export_mesh=True")
+
+    if show_any_plot:
         plt.show()
 
     print(

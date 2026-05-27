@@ -7,11 +7,13 @@ Usage
 
     plot_mesh_json("C001_Mesh_files/A004_hexagonal_mesh.mesh.json")
     plot_graph_mesh("C001_Mesh_files/A004_G000.graph.json")
+    plot_graph_json_with_source("C001_Mesh_files/A004_H000.grid.json")
 """
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import json
 import numpy as np
 from collections import defaultdict
 import matplotlib.pyplot as plt
@@ -19,6 +21,13 @@ from matplotlib.collections import PolyCollection
 from matplotlib.patches import Circle
 
 from A001_functions.Hex_5 import read_mesh_json, read_graph_mesh
+
+
+def _read_graph_json_metadata(graph_path: str) -> dict:
+    """Return graph/grid/gridhex JSON metadata used only for plot labels."""
+    with open(graph_path, "r") as f:
+        payload = json.load(f)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +237,7 @@ def plot_graph_mesh(
     *,
     figsize: tuple = (10, 10),
     title: str = None,
+    show_nodes: bool = True,
     show: bool = True,
 ) -> plt.Figure:
     """
@@ -245,6 +255,8 @@ def plot_graph_mesh(
         Figure size.
     title : str or None
         Custom title; auto-generated when *None*.
+    show_nodes : bool
+        Show graph/grid/gridhex nodes.
     show : bool
         Call ``plt.show()`` at the end.
 
@@ -253,6 +265,8 @@ def plot_graph_mesh(
     fig : plt.Figure
     """
     graph = read_graph_mesh(graph_path)
+    payload = _read_graph_json_metadata(graph_path)
+    graph_type = payload.get("type", "graph")
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -269,35 +283,76 @@ def plot_graph_mesh(
     # Nodes
     orig_mask = graph.node_ids == 1
     sub_mask  = graph.node_ids == 2
+    other_mask = ~(orig_mask | sub_mask)
 
-    if np.any(orig_mask):
-        pts = graph.nodes[orig_mask]
-        ax.scatter(pts[:, 0], pts[:, 1], s=30, c="black", zorder=5,
-                   edgecolors="white", linewidths=0.4,
-                   label="Original (ID 1)")
-    if np.any(sub_mask):
-        pts = graph.nodes[sub_mask]
-        ax.scatter(pts[:, 0], pts[:, 1], s=20, c="red", zorder=4,
-                   edgecolors="white", linewidths=0.3,
-                   label="Subdivision (ID 2)")
+    if show_nodes:
+        if np.any(orig_mask):
+            pts = graph.nodes[orig_mask]
+            ax.scatter(pts[:, 0], pts[:, 1], s=30, c="black", zorder=5,
+                       edgecolors="white", linewidths=0.4,
+                       label="Original (ID 1)")
+        if np.any(sub_mask):
+            pts = graph.nodes[sub_mask]
+            ax.scatter(pts[:, 0], pts[:, 1], s=20, c="red", zorder=4,
+                       edgecolors="white", linewidths=0.3,
+                       label="Subdivision (ID 2)")
+        if np.any(other_mask):
+            pts = graph.nodes[other_mask]
+            other_ids = sorted(set(int(x) for x in graph.node_ids[other_mask]))
+            ax.scatter(pts[:, 0], pts[:, 1], s=18, c="dimgray", zorder=4,
+                       edgecolors="white", linewidths=0.3,
+                       label=f"Other IDs {other_ids}")
 
     ax.set_aspect("equal")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     if title is None:
         title = (
-            f"Graph mesh: {graph.n_nodes} nodes "
-            f"({int(orig_mask.sum())} orig + {int(sub_mask.sum())} sub), "
+            f"{graph_type} mesh: {graph.n_nodes} nodes "
+            f"({int(orig_mask.sum())} ID1 + {int(sub_mask.sum())} ID2"
+            f" + {int(other_mask.sum())} other), "
             f"{graph.n_bars} sub-bars from "
             f"{len(unique_bars)} original bars"
         )
     ax.set_title(title)
-    ax.legend(loc="upper right")
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="upper right")
     fig.tight_layout()
 
     if show:
         plt.show()
     return fig
+
+
+def plot_graph_json_with_source(
+    graph_path: str,
+    *,
+    source_mesh_path: str = None,
+    overlay_mesh: bool = True,
+    boundary_only: bool = False,
+    show_nodes_graph: bool = True,
+    show: bool = True,
+) -> plt.Figure:
+    """
+    Plot a graph/grid/gridhex JSON file, optionally over its source mesh.
+
+    When *source_mesh_path* is omitted, the function uses the
+    ``source_mesh_path`` stored inside the graph-like JSON file.
+    """
+    payload = _read_graph_json_metadata(graph_path)
+    mesh_path = source_mesh_path or payload.get("source_mesh_path")
+
+    if overlay_mesh and mesh_path:
+        return plot_mesh_json_and_graph(
+            mesh_path,
+            graph_path,
+            boundary_only=boundary_only,
+            show_nodes_graph=show_nodes_graph,
+            show=show,
+        )
+
+    return plot_graph_mesh(graph_path, show_nodes=show_nodes_graph, show=show)
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +475,7 @@ def plot_mesh_json_and_graph(
     if show_nodes_graph:
         orig_mask = graph.node_ids == 1
         sub_mask = graph.node_ids == 2
+        other_mask = ~(orig_mask | sub_mask)
         if np.any(orig_mask):
             pts = graph.nodes[orig_mask]
             ax.scatter(pts[:, 0], pts[:, 1], s=30, c="black", zorder=6,
@@ -430,6 +486,12 @@ def plot_mesh_json_and_graph(
             ax.scatter(pts[:, 0], pts[:, 1], s=20, c="red", zorder=5,
                        edgecolors="white", linewidths=0.3,
                        label="Graph subdivision")
+        if np.any(other_mask):
+            pts = graph.nodes[other_mask]
+            other_ids = sorted(set(int(x) for x in graph.node_ids[other_mask]))
+            ax.scatter(pts[:, 0], pts[:, 1], s=18, c="dimgray", zorder=5,
+                       edgecolors="white", linewidths=0.3,
+                       label=f"Graph IDs {other_ids}")
 
     ax.set_xlim(-0.05 * L, 1.05 * L)
     ax.set_ylim(-0.05 * L, 1.05 * L)
@@ -444,7 +506,9 @@ def plot_mesh_json_and_graph(
             f"Graph: {graph.n_nodes} nodes, {graph.n_bars} bars"
         )
     ax.set_title(title)
-    ax.legend(loc="upper right")
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="upper right")
     fig.tight_layout()
 
     if show:
