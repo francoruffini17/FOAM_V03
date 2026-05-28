@@ -2,10 +2,16 @@ import importlib.util
 import sys
 from .Video_functions import *
 
-# Ask the user for the filename
-sim_num = int(input("Simulation number: "))
-file_name = input("Enter the filename containing T_C and SCONF (default: F001_Video_properties_files/Video_properties0031): ") or "F001_Video_properties_files/Video_properties0031"
-file_name = file_name + ".py"
+# Get sim_num and property_file from command-line arguments
+# Usage: python -m A001_functions.Video_executor <sim_num> <properties_id> [--parallel <n>]
+sim_num = int(sys.argv[1])
+file_name = f"F001_Video_properties_files/Video_properties_{sys.argv[2]}.py"
+
+# Optional --parallel flag
+max_parallel_override = None
+if '--parallel' in sys.argv:
+    idx = sys.argv.index('--parallel')
+    max_parallel_override = int(sys.argv[idx + 1])
 
 # Load the module dynamically
 spec = importlib.util.spec_from_file_location("video_properties", file_name)
@@ -18,6 +24,8 @@ T = module.T  # Corrected from T_C1 to T_C
 SCONF = module.SCONF
 
 
-create_frames_for_sim(sim_num,T,  max_parallel=T.max_parallel, frames_format=T.frames_format)
+max_parallel = max_parallel_override if max_parallel_override is not None else T.max_parallel
+
+create_frames_for_sim(sim_num, T, max_parallel=max_parallel, frames_format=T.frames_format)
 concatenate_multiple_images_for_sim(sim_num,T)
 create_vid_from_frames_for_sim(sim_num, SCONF)

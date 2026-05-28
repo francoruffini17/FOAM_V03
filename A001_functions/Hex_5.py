@@ -1736,9 +1736,14 @@ class HexagonalMeshGenerator:
 
         def _draw_holes(ax):
             if show_holes:
-                for center in self.hole_centers:
+                if hasattr(self, "hole_radii") and len(self.hole_radii) == len(self.hole_centers):
+                    radii = self.hole_radii
+                else:
+                    radii = np.full(len(self.hole_centers), self.geometry.hole_radius)
+
+                for center, radius in zip(self.hole_centers, radii):
                     circle = Circle(
-                        center, self.geometry.hole_radius,
+                        center, radius,
                         fill=False, edgecolor='black', linewidth=1.0, zorder=4,
                     )
                     ax.add_patch(circle)

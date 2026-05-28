@@ -117,6 +117,8 @@ def READ_DATA_RED_GRL(file_name, type = 'A'):
                         C1 = 'PERN-9999998'
                     elif 'PERN-9999999' in group:
                         C1 = 'PERN-9999999'
+                    elif 'ASSEMBLY' in group:
+                        C1 = 'ASSEMBLY'
                     else:
                         print('ERROR WHILE READING C1')
                         print(group)
@@ -138,6 +140,10 @@ def READ_DATA_RED_GRL(file_name, type = 'A'):
                                     DATA[C3][C1][str(node_or_elem_num)] = {}
                                             
                                 DATA[C3][C1][str(node_or_elem_num)] = VAL
+                        elif C1 == 'ASSEMBLY':
+                            if C3 not in DATA.keys():
+                                DATA[C3] = {}
+                            DATA[C3]['ASSEMBLY'] = VAL
 
 
 

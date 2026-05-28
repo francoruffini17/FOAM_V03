@@ -19,6 +19,33 @@ from scipy.linalg import fractional_matrix_power
 from numba import jit
 
 
+def _mesh_prefix_from_input_name(input_name: str) -> str:
+    """
+    Return the mesh artifact prefix used in C001_Mesh_files.
+
+    New mesh JSON files are named like ``R010.mesh.json`` and derived files are
+    named like ``R010_J2000.graph.json``.  Older inputs may still include extra
+    underscore suffixes, so keep the old split fallback for those.
+    """
+    base = os.path.basename(input_name)
+    if base.endswith(".mesh.json"):
+        return base[:-len(".mesh.json")]
+    return base.split("_")[0]
+
+
+def _mesh_artifact_path(mesh_prefix: str, family: str, ext_id: int, suffix: str) -> str:
+    """Build a C001_Mesh_files artifact path for J/H/I/K/T derived meshes."""
+    return f"C001_Mesh_files/{mesh_prefix}_{family}{ext_id:03d}.{suffix}"
+
+
+def _mesh_prefix_for_sim(sim_num: int) -> str:
+    """Read the simulation JSON and derive the mesh artifact prefix."""
+    json_path = f"I001_Results/OBJ_files/SIM_{sim_num:03d}.json"
+    with open(json_path, "r") as f:
+        sim_json = json.load(f)
+    return _mesh_prefix_from_input_name(sim_json["input_name"])
+
+
 def merge_data(data, dataa2):
     """
     Creates a new dictionary based on `data`, adding or updating 
@@ -798,7 +825,7 @@ def create_PKL_T1(
         - elements[str(elem_id)] -> list of 1-based node ids (string key)
         - t -> list of timestep floats
     triangulation_file : str
-        Path to triangulation file (as produced by Triangulation_creator.py).
+        Path to triangulation file (as produced by A001_functions/Triangulation_creator.py).
         Format (values may be comma- or space-separated):
             N_nodes
             x  y  ID      (one row per node)
@@ -2746,10 +2773,11 @@ def process_simulation(args):
         if in_T1 in ('y', 'Y'):
             with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
                 data_varC2 = pickle.load(f)
+            mesh_prefix = _mesh_prefix_for_sim(i)
 
             for ext_T1s in range(T1_ini, T1_fin + 1):
                 try:
-                    tri_file = f'./C001_Mesh_files/T{ext_T1s:03d}.tri'
+                    tri_file = _mesh_artifact_path(mesh_prefix, "T", ext_T1s, "tri")
 
                     data_T1 = create_PKL_T1(
                         data_varC2, tri_file,
@@ -2799,16 +2827,13 @@ def process_simulation(args):
                 data_varC2 = pickle.load(f)
 
             # Resolve graph file path from the simulation JSON
-            json_path = f'I001_Results/OBJ_files/SIM_{i:03d}.json'
-            with open(json_path, 'r') as f:
-                sim_json = json.load(f)
-            mesh_prefix = os.path.basename(sim_json['input_name']).split('_')[0]
+            mesh_prefix = _mesh_prefix_for_sim(i)
 
 
             for ext_Js in range(J_ini, J_fin + 1):
 
                 try:
-                    graph_path = f'C001_Mesh_files/{mesh_prefix}_G{ext_Js:03d}.graph.json'
+                    graph_path = _mesh_artifact_path(mesh_prefix, "J", ext_Js, "graph.json")
 
                     data_J1 = create_PKL_J1(
                         data_varB, data_varC2, graph_path,
@@ -2882,16 +2907,13 @@ def process_simulation(args):
                 data_varC2 = pickle.load(f)
 
             # Resolve graph file path from the simulation JSON
-            json_path = f'I001_Results/OBJ_files/SIM_{i:03d}.json'
-            with open(json_path, 'r') as f:
-                sim_json = json.load(f)
-            mesh_prefix = os.path.basename(sim_json['input_name']).split('_')[0]
+            mesh_prefix = _mesh_prefix_for_sim(i)
 
 
             for ext_Hs in range(H_ini, H_fin + 1):
 
                 try:
-                    graph_path = f'C001_Mesh_files/{mesh_prefix}_H{ext_Hs:03d}.grid.json'
+                    graph_path = _mesh_artifact_path(mesh_prefix, "H", ext_Hs, "grid.json")
 
                     data_H1 = create_PKL_J1(
                         data_varB, data_varC2, graph_path,
@@ -2965,16 +2987,13 @@ def process_simulation(args):
                 data_varC2 = pickle.load(f)
 
             # Resolve graph file path from the simulation JSON
-            json_path = f'I001_Results/OBJ_files/SIM_{i:03d}.json'
-            with open(json_path, 'r') as f:
-                sim_json = json.load(f)
-            mesh_prefix = os.path.basename(sim_json['input_name']).split('_')[0]
+            mesh_prefix = _mesh_prefix_for_sim(i)
 
 
             for ext_Is in range(I_ini, I_fin + 1):
 
                 try:
-                    graph_path = f'C001_Mesh_files/{mesh_prefix}_I{ext_Is:03d}.gridhex.json'
+                    graph_path = _mesh_artifact_path(mesh_prefix, "I", ext_Is, "gridhex.json")
 
                     data_I1 = create_PKL_J1(
                         data_varB, data_varC2, graph_path,
@@ -3048,15 +3067,12 @@ def process_simulation(args):
                 data_varC2 = pickle.load(f)
 
             # Resolve mesh prefix from the simulation JSON
-            json_path = f'I001_Results/OBJ_files/SIM_{i:03d}.json'
-            with open(json_path, 'r') as f:
-                sim_json = json.load(f)
-            mesh_prefix = os.path.basename(sim_json['input_name']).split('_')[0]
+            mesh_prefix = _mesh_prefix_for_sim(i)
 
             for ext_Ks in range(K_ini, K_fin + 1):
 
                 try:
-                    gridhex_path = f'C001_Mesh_files/{mesh_prefix}_K{ext_Ks:03d}.gridhex.json'
+                    gridhex_path = _mesh_artifact_path(mesh_prefix, "K", ext_Ks, "gridhex.json")
 
                     data_K1 = create_PKL_K1(
                         data_varB, data_varC2, gridhex_path,

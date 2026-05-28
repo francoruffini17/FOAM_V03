@@ -10,6 +10,7 @@ import cv2
 import subprocess
 import tempfile
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from PIL import Image, ImageDraw, ImageFont
 from dataclasses import dataclass, field
 from typing import Any, List
@@ -1083,6 +1084,7 @@ class frame_variable:
     file_key_y: str = 'A2'
     file_key_x: str = 'A2'
     yscale: str = 'linear'
+    ratio_key_pairs: list = None
 
 
 
@@ -1102,7 +1104,8 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
         deriv_order = int(deriv_order)
 
     x_key_path =T.x_key_path
-    y_key_paths = T.y_key_paths
+    y_key_paths = T.y_key_paths or []
+    ratio_key_pairs = getattr(T, 'ratio_key_pairs', None) or []
     t_x = T.t_x
     legends = T.legends
     invert_y = T.invert_y
@@ -1126,12 +1129,13 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
 
     plot_legends = True
 
-    # Ensure legends match the number of curves
+    # Ensure legends match the number of curves (y_key_paths + ratio_key_pairs)
+    total_curves = len(y_key_paths) + len(ratio_key_pairs)
     if legends is None:
-        legends = [f"Curve {i+1}" for i in range(len(y_key_paths))]
+        legends = [f"Curve {i+1}" for i in range(total_curves)]
         plot_legends = False
-    elif len(legends) != len(y_key_paths):
-        raise ValueError("The number of legends must match the number of y_key_paths.")
+    elif len(legends) != total_curves:
+        raise ValueError("The number of legends must match the total number of curves (y_key_paths + ratio_key_pairs).")
 
 
     data_x = pkl_A2_obj
@@ -1188,6 +1192,19 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
             print(y_key_path)
             print('Warning variable do not exist')
 
+    # Plot ratio curves
+    for i, (num_path, den_path) in enumerate(ratio_key_pairs):
+        try:
+            num_vals = np.array(eval(f"data_y{num_path}"))
+            den_vals = np.array(eval(f"data_y{den_path}"))
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = np.where(den_vals != 0, num_vals / den_vals, np.nan)
+            label = legends[len(y_key_paths) + i]
+            plt.plot(D, ratio, '-', label=label)
+            if t_x is not None:
+                plt.scatter(D[t_x], ratio[t_x], color='red')
+        except Exception:
+            print(f"Warning: ratio {num_path}/{den_path} could not be computed")
 
         
     if xlabel is not None:
@@ -1392,7 +1409,42 @@ def flexible_image_compositor_updated(T):
         print(f"Error in flexible_image_compositor_updated: {e}")
 
 
-def create_frames_for_sim(sim_num, T_C, max_parallel=50, frames_format='png'):
+def _create_single_frame_object(args):
+    """Module-level helper for parallel frame-object creation (one process per object)."""
+    frame_type, obj, sim_num, save_path, replace_frames, frames_format = args
+
+    frame_functions = {
+        'V':   create_variable_multiple_frames,
+        'A':   create_animation_multiple_frames,
+        'GP':  create_graph_property_multiple_frames,
+        'GA':  create_animation_graph_multiple_frames,
+        'T1A': create_animation_T1_multiple_frames,
+    }
+
+    if frame_type not in frame_functions or obj is None:
+        return
+
+    print(replace_frames is True)
+    print(save_path)
+
+    if not replace_frames and os.path.exists(save_path) and len(os.listdir(save_path)) > 0:
+        print(f"Skipping frame creation for {save_path} (replace_frames=False and folder exists)")
+        return
+
+    if replace_frames is True or not os.path.exists(save_path):
+        print(f"Overwriting frame creation for {save_path}")
+        try:
+            if frame_type in ['EFS', 'EM', 'EB', 'EA']:
+                frame_functions[frame_type](sim_num, obj, num_workers=1, save_path=save_path, frames_format=frames_format)
+            else:
+                frame_functions[frame_type](sim_num, obj, save_path=save_path, frames_format=frames_format)
+        except Exception as e:
+            print(f"Skipping {save_path}: {e}")
+    else:
+        print('SOMETHING NOT WORKING in create_frames_for_sim')
+
+
+def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
     delete_frames = T_C.delete_frames
     frames_type_to_create = []
     objects = []
@@ -1417,41 +1469,25 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=50, frames_format='png'):
         'T1A': create_animation_T1_multiple_frames,
     }
 
-    # Iterate through frames_to_create and corresponding objects
+    tasks = []
     for frame_type, obj in zip(frames_type_to_create, objects):
+        if frame_type in frame_functions and obj is not None:
+            save_path = f'I002_Videos/{T_C.vid_folder}/SIM_{sim_num:03d}/' + obj.save_path
 
-        try:
-            if frame_type in frame_functions and obj is not None:
-                save_path = f'I002_Videos/{T_C.vid_folder}/SIM_{sim_num:03d}/' + obj.save_path
+            replace_frames = True
+            for ele in T_C.elements:
+                if ele.get('path', None) == obj.save_path:
+                    replace_frames = ele.get('replace_frames', True)
+                    break
 
-                # Check for replace_frames attribute in the corresponding element
-                # Find the element in T_C.elements that matches this obj.save_path
-                replace_frames = True  # Default to True if not specified
-                for ele in T_C.elements:
-                    if ele.get('path', None) == obj.save_path:
-                        replace_frames = ele.get('replace_frames', True)
-                        break
-                print(replace_frames is True)
-                print(save_path)
-                # If replace_frames is False and folder exists, skip frame creation
-                if not replace_frames and os.path.exists(save_path) and len(os.listdir(save_path)) > 0:
-                    print(f"Skipping frame creation for {save_path} (replace_frames=False and folder exists)")
-                    continue
+            tasks.append((frame_type, obj, sim_num, save_path, replace_frames, frames_format))
 
-                elif replace_frames is True or not os.path.exists(save_path): #it is created if replace_frames is true or if the path doesnt exist
-                    print(f"Overwriting frame creation for {save_path} (replace_frames=True and folder exists)")
-                    if frame_type == 'asdasA':
-                        frame_functions[frame_type](sim_num, obj, save_path=save_path, max_parallel=max_parallel, frames_format=frames_format)
-                    elif frame_type in ['EFS','EM','EB','EA']:
-                        frame_functions[frame_type](sim_num, obj, num_workers=max_parallel, save_path=save_path, frames_format=frames_format)
-                    else:
-                        frame_functions[frame_type](sim_num, obj, save_path=save_path, frames_format=frames_format)
-
-                else:
-                    print('SOMETHING NOT WORKING in create_frames_for_sim')
-                    
-        except Exception as e:
-            print(f"Error creating frames for type {frame_type}: {e}")
+    if max_parallel > 1:
+        with ProcessPoolExecutor(max_workers=max_parallel) as executor:
+            list(executor.map(_create_single_frame_object, tasks))
+    else:
+        for task in tasks:
+            _create_single_frame_object(task)
 
 
 def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format='png'):

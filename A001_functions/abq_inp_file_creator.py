@@ -746,9 +746,17 @@ def S6(input_name,output_name, OBJ):
                 elif A == '8':
                     corner_BR = idx
 
+            # Identify corner indices so they can be excluded from edge pairs
+            # (corners are handled by their own equations in section 3)
+            corner_indices = set(
+                c for c in (corner_BL, corner_TR, corner_TL, corner_BR)
+                if c is not None
+            )
+
             # Sort and pair LR by y, UL by x
             if json_pairs_lr:
-                pairs_lr = json_pairs_lr
+                pairs_lr = [(li, ri) for li, ri in json_pairs_lr
+                            if li not in corner_indices and ri not in corner_indices]
             else:
                 left_nodes.sort(key=lambda t: t[1])
                 right_nodes.sort(key=lambda t: t[1])
@@ -760,7 +768,8 @@ def S6(input_name,output_name, OBJ):
                 pairs_lr = [(li, ri) for (li, _), (ri, _) in zip(left_nodes, right_nodes)]
 
             if json_pairs_ul:
-                pairs_ul = json_pairs_ul
+                pairs_ul = [(bi, ti) for bi, ti in json_pairs_ul
+                            if bi not in corner_indices and ti not in corner_indices]
             else:
                 bottom_nodes.sort(key=lambda t: t[1])
                 top_nodes.sort(key=lambda t: t[1])
