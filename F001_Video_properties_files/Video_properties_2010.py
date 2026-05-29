@@ -684,13 +684,13 @@ A50.plot_T1_params.color_by = ('w', (1, 1, 2, 2))   # → t2['w'][(1,1,2,2)][eid
 
 A51 = frame_variable()   
 A51.x_key_path = "['U2']['PERN-9999997']"
-A51.y_key_paths = ["['W'][(1,1,2,2)]"]
+A51.y_key_paths = ["['w_cv_area_weighted'][(1,1,2,2)]"]
 A51.normalize_x = -1
-A51.legends = ['W']
+A51.legends = ['w cv area-weighted']
 A51.normalized_by = 1
 A51.invert_y = False
 A51.xlabel = "Displacement [mm]"
-A51.ylabel = "W"
+A51.ylabel = "w CV area-weighted"
 A51.title = None
 A51.derivative = False
 A51.save_path = 'frames_A/'
@@ -700,7 +700,7 @@ A51.num_frames = num_frames
 A51.plot_from_0 = False
 A51.file_key_y = 'T2_001'
 A51.file_key_x = 'A2'
-A51.yscale = 'log'
+A51.yscale = 'linear'
 
 
 
@@ -730,8 +730,8 @@ A52.yscale = 'log'
 
 A60 = frame_variable()
 A60.x_key_path = "['t']"
-A60.y_key_paths = ["['ALLIE']['ASSEMBLY']", "['ALLKE']['ASSEMBLY']"]
-A60.legends = ['ALLIE', 'ALLKE']
+A60.y_key_paths = ["['ALLIE']['ASSEMBLY']", "['ALLSD']['ASSEMBLY']"]
+A60.legends = ['ALLIE', 'ALLSD']
 A60.normalized_by = 1
 A60.invert_y = False
 A60.xlabel = "Time [s]"
@@ -750,12 +750,12 @@ A60.file_key_y = 'A'
 A61 = frame_variable()
 A61.x_key_path = "['t']"
 A61.y_key_paths = []
-A61.ratio_key_pairs = [("['ALLSE']['ASSEMBLY']", "['ALLIE']['ASSEMBLY']")]
-A61.legends = ['ALLSE / ALLIE']
+A61.ratio_key_pairs = [("['ALLSD']['ASSEMBLY']", "['ALLSE']['ASSEMBLY']")]
+A61.legends = ['ALLSD / ALLSE']
 A61.normalized_by = 1
 A61.invert_y = False
 A61.xlabel = "Time [s]"
-A61.ylabel = "ALLSE / ALLIE"
+A61.ylabel = "ALLSD / ALLSE"
 A61.title = None
 A61.derivative = False
 A61.save_path = 'frames_A61/'
@@ -912,7 +912,7 @@ T.elements = [
         "size": (500, 500),
         "path": "frames_A10/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": A10,
         "replace_frames": False,
@@ -924,7 +924,7 @@ T.elements = [
         "size": (500, 500),
         "path": "frames_A11/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": A11,
         "replace_frames": False,
@@ -1354,7 +1354,7 @@ T.elements = [
         # "size": (500, 400),
         "size": (500, 500), 
         "path": "frames_A51/",
-        "subtitle": "Edge index",
+        "subtitle": "Energy density variability",
         "create_frames": True,
         "type": 'V',
         "object": A51,
@@ -1408,7 +1408,6 @@ SCONF.frame_rate = 30
 SCONF.codec = "mp4v"
 SCONF.frames_pattern = 'frames_final/frame_*.png'
 SCONF.video_output_name = 'video_test.mp4'
-
 
 
 

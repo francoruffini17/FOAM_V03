@@ -1,7 +1,34 @@
 #!/bin/bash
 
-source "/opt/anaconda3/etc/profile.d/conda.sh" || {
-    printf "Error: Failed to source conda initialization script.\n" >&2
+CONDA_SH=""
+
+if [[ -n "${CONDA_EXE:-}" ]]; then
+    CONDA_ROOT="$(dirname "$(dirname "$CONDA_EXE")")"
+    if [[ -f "$CONDA_ROOT/etc/profile.d/conda.sh" ]]; then
+        CONDA_SH="$CONDA_ROOT/etc/profile.d/conda.sh"
+    fi
+fi
+
+if [[ -z "$CONDA_SH" ]]; then
+    for candidate in \
+        "$HOME/miniconda3/etc/profile.d/conda.sh" \
+        "$HOME/anaconda3/etc/profile.d/conda.sh" \
+        "/opt/anaconda3/etc/profile.d/conda.sh"
+    do
+        if [[ -f "$candidate" ]]; then
+            CONDA_SH="$candidate"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$CONDA_SH" ]]; then
+    printf "Error: Could not find conda initialization script.\n" >&2
+    exit 1
+fi
+
+source "$CONDA_SH" || {
+    printf "Error: Failed to source conda initialization script: %s\n" "$CONDA_SH" >&2
     exit 1
 }
 
@@ -89,6 +116,7 @@ declare -A OUTPUT_OPTIONS=(
 )
 
 CPUS=15
+ABQ_CMD="${ABQ_CMD:-}"
 DELETE_ODB="n"
 CREATE_VIDEO="n"
 MOVE_FOLDER="n"
@@ -102,6 +130,8 @@ for arg in "$@"; do
         OUTPUT_OPTIONS[$key]="$value"
     elif [[ "$key" == "cpus" && "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]]; then
         CPUS="$value"
+    elif [[ "$key" == "ABQ_CMD" ]]; then
+        ABQ_CMD="$value"
     elif [[ "$key" == "DELETE_ODB" && ("$value" == "y" || "$value" == "n") ]]; then
         DELETE_ODB="$value"
     elif [[ "$key" == "CREATE_VIDEO" && ("$value" == "y" || "$value" == "n") ]]; then
@@ -118,6 +148,43 @@ for arg in "$@"; do
         printf "Warning: Ignoring unknown or invalid option %s\n" "$arg" >&2
     fi
 done
+
+resolve_abq_cmd() {
+    local candidate resolved
+
+    if [[ -n "$ABQ_CMD" ]]; then
+        if [[ -x "$ABQ_CMD" ]]; then
+            return 0
+        fi
+        if resolved="$(command -v "$ABQ_CMD" 2>/dev/null)"; then
+            ABQ_CMD="$resolved"
+            return 0
+        fi
+        printf "Error: Abaqus command '%s' was not found or is not executable.\n" "$ABQ_CMD" >&2
+        return 1
+    fi
+
+    for candidate in \
+        "abq" \
+        "/var/DassaultSystemes/SIMULIA/Commands/abq" \
+        "abaqus"
+    do
+        if [[ -x "$candidate" ]]; then
+            ABQ_CMD="$candidate"
+            return 0
+        fi
+        if resolved="$(command -v "$candidate" 2>/dev/null)"; then
+            ABQ_CMD="$resolved"
+            return 0
+        fi
+    done
+
+    printf "Error: Abaqus command not found. Try passing ABQ_CMD=/path/to/abq.\n" >&2
+    return 1
+}
+
+resolve_abq_cmd || exit 1
+printf "Using Abaqus command: %s\n" "$ABQ_CMD"
 
 create_video() {
     local sim_number="$1"
@@ -146,7 +213,7 @@ run_simulation() {
     cd "$sim_path" || { printf "Error: Cannot access directory %s\n" "$sim_path" >&2; return 1; }
 
     local sim_log="${sim}.log"
-    abq job="$sim" cpus="$CPUS" double interactive > "$sim_log" 2>&1
+    "$ABQ_CMD" job="$sim" cpus="$CPUS" double interactive > "$sim_log" 2>&1
     local status=$?
 
     cd - > /dev/null
@@ -182,7 +249,7 @@ process_results() {
 
     local reduce_input_file="reduce_inputs_${sim_number}.txt"
 
-    printf "%s\n%s\nI001_Results\n%s\n" "$sim_number" "$sim_number" "$DELETE_ODB" | abq python "$FUNCTIONS_DIR/abq_scriptV9.py" > "$log_folder/SIM_${sim_number}.log" 2>&1
+    printf "%s\n%s\nI001_Results\n%s\n" "$sim_number" "$sim_number" "$DELETE_ODB" | "$ABQ_CMD" python "$FUNCTIONS_DIR/abq_scriptV9.py" > "$log_folder/SIM_${sim_number}.log" 2>&1
 
     if [[ ! -f "I001_Results/RES_SIM_${sim_number}.csv" ]]; then
         printf "Error: Expected results file RES_SIM_%s.csv was not created.\n" "$sim_number" >&2
@@ -236,7 +303,11 @@ start_simulation() {
     fi
 
     (
-        run_simulation "$sim"; queue_processing "$sim"
+        if run_simulation "$sim"; then
+            queue_processing "$sim"
+        else
+            printf "Skipping result processing for %s because the simulation failed.\n" "$sim" >&2
+        fi
     ) &
     RUNNING_SIM_PIDS+=("$!")
     SIMS_RUN+=("$sim")

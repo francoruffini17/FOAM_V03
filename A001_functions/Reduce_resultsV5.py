@@ -845,13 +845,13 @@ def create_PKL_T1(
     dict  PKL_T1
         PKL_T1['t']                              -> list of timesteps
         PKL_T1['nodes'][ti][nid]                 -> (x_def, y_def, ID)
-        PKL_T1['elements'][element_id]           -> [n1, n2, n3]  (1-based)
+        PKL_T1['elements'][element_id]           -> [n1, n2, n3]  (0-based)
         PKL_T1['elements_area'][element_id][ti]  -> area at timestep ti
         PKL_T1['elements_area_normalized'][element_id][ti]
                                                  -> area(ti) / area(undeformed)
+        PKL_T1['node_matches'][nid]              -> FEM mesh node id used by
+                                                     triangulation node nid
     """
-
-    from A001_functions.Hex_5 import _shape_functions_quad
 
     # ------------------------------------------------------------------
     # 0.  Load scale factors from JSON
@@ -870,8 +870,8 @@ def create_PKL_T1(
     # ------------------------------------------------------------------
     # 1.  Read triangulation file
     # ------------------------------------------------------------------
-    tri_nodes_raw = []   # list of (x, y, ID)  – unscaled
-    tri_elements_raw = []  # list of [n1, n2, n3]  – 0-based
+    tri_nodes_raw = []     # list of (x, y, ID) - unscaled
+    tri_elements_raw = []  # list of [n1, n2, n3] - 0-based
 
     with open(triangulation_file, 'r') as ft:
         n_tri_nodes = int(ft.readline().strip())
@@ -883,137 +883,49 @@ def create_PKL_T1(
             parts = ft.readline().strip().replace(',', ' ').split()
             tri_elements_raw.append([int(parts[0]), int(parts[1]), int(parts[2])])
 
-    # Scale triangulation nodes to physical dimensions
     tri_nodes_scaled = [(x * scale_x, y * scale_y, ID)
                         for x, y, ID in tri_nodes_raw]
-    tri_nodes_arr = np.array([(x, y) for x, y, _ in tri_nodes_scaled], dtype=float)
+    tri_node_ids = [ID for _, _, ID in tri_nodes_scaled]
 
     print(f"  Triangulation: {n_tri_nodes} nodes, {n_tri_elems} elements")
 
     # ------------------------------------------------------------------
-    # 2.  Build the undeformed FEM node list (from mesh file, NOT nodes_time[0])
+    # 2.  Build the undeformed FEM node list and snap triangulation nodes
     # ------------------------------------------------------------------
     mesh_nodes_raw, _ = read_mesh_json(mesh_file_path)
     n_fe_nodes = len(DATA_C2['nodes_time'][0])
     nodes_undeformed = [(float(x) * scale_x, float(y) * scale_y)
                         for x, y, _ in mesh_nodes_raw]
-    assert len(nodes_undeformed) == n_fe_nodes, (
-        f"Mesh file has {len(nodes_undeformed)} nodes but DATA_C2 has {n_fe_nodes}")
+    if len(nodes_undeformed) != n_fe_nodes:
+        raise ValueError(
+            f"Mesh file has {len(nodes_undeformed)} nodes but DATA_C2 has "
+            f"{n_fe_nodes}"
+        )
 
-    nodes_undef_arr = np.array(nodes_undeformed, dtype=float)  # shape (N_fem, 2)
+    nodes_undef_arr = np.array(nodes_undeformed, dtype=float)
+    tri_xy_scaled = np.array([(x, y) for x, y, _ in tri_nodes_scaled], dtype=float)
+    snap_distances, matched_indices = cKDTree(nodes_undef_arr).query(
+        tri_xy_scaled, k=1
+    )
+    if np.isscalar(matched_indices):
+        matched_indices = np.array([matched_indices])
+        snap_distances = np.array([snap_distances])
 
-    # ------------------------------------------------------------------
-    # 3.  Element-centroid KD-tree for element search (undeformed config)
-    # ------------------------------------------------------------------
-    elem_keys = sorted(DATA_C2['elements'].keys(), key=int)
-    n_elements = len(elem_keys)
+    matched_mesh_node_ids = [int(idx) + 1 for idx in matched_indices]
+    node_matches = {
+        tri_node_id: mesh_node_id
+        for tri_node_id, mesh_node_id in enumerate(matched_mesh_node_ids, start=1)
+    }
 
-    def _get_element_nodes_undef(ek):
-        return np.array([nodes_undeformed[n - 1]
-                         for n in DATA_C2['elements'][ek]], dtype=float)
-
-    centroids = np.array([_get_element_nodes_undef(ek).mean(axis=0)
-                          for ek in elem_keys], dtype=float)
-    elem_tree = cKDTree(centroids)
-
-    K_NEIGHBOURS = min(30, n_elements)
-
-    # ------------------------------------------------------------------
-    # 4.  For every triangulation node: find the containing FEM element
-    #     (in undeformed config) or mark as "in hole"
-    # ------------------------------------------------------------------
-    node_elem_cache    = [None]  * n_tri_nodes   # element string key
-    node_natural_cache = [None]  * n_tri_nodes   # (xi, eta) natural coords
-    node_in_hole       = [False] * n_tri_nodes   # True → use hole interpolation
-
-    for nidx in range(n_tri_nodes):
-        x0, y0, _ = tri_nodes_scaled[nidx]
-        _, near_idxs = elem_tree.query([x0, y0], k=K_NEIGHBOURS)
-        if np.isscalar(near_idxs):
-            near_idxs = [near_idxs]
-
-        found = False
-        best_elem, best_dist = None, np.inf
-        best_xi, best_eta   = None, None
-
-        for cidx in near_idxs:
-            ek = elem_keys[int(cidx)]
-            nodes_undef = _get_element_nodes_undef(ek)
-            n_en = len(DATA_C2['elements'][ek])
-
-            if n_en == 3:
-                xi, eta = _map_physical_to_natural_tri(x0, y0, nodes_undef)
-                if _point_in_tri(xi, eta, tol=1e-8):
-                    node_elem_cache[nidx]    = ek
-                    node_natural_cache[nidx] = (xi, eta)
-                    found = True
-                    break
-                dist = _dist_outside_tri(xi, eta)
-            else:
-                xi, eta = _map_physical_to_natural_quad(x0, y0, nodes_undef)
-                if abs(xi) <= 1.0 + 1e-8 and abs(eta) <= 1.0 + 1e-8:
-                    node_elem_cache[nidx]    = ek
-                    node_natural_cache[nidx] = (xi, eta)
-                    found = True
-                    break
-                dist = max(abs(xi), abs(eta))
-
-            if dist < best_dist:
-                best_dist = dist
-                best_elem = ek
-                best_xi, best_eta = xi, eta
-
-        if not found:
-            # Node is inside a mesh hole → flag for left/right/top/bottom
-            # interpolation.  Keep best element as fallback (unused).
-            node_in_hole[nidx]       = True
-            node_elem_cache[nidx]    = best_elem
-            node_natural_cache[nidx] = (best_xi, best_eta)
-
-        if (nidx + 1) % 500 == 0 or nidx == n_tri_nodes - 1:
-            n_holes = sum(node_in_hole[:nidx + 1])
-            print(f"  Element search: {nidx + 1}/{n_tri_nodes} nodes done "
-                  f"({n_holes} in holes so far)")
+    mean_snap = float(np.mean(snap_distances)) if n_tri_nodes else 0.0
+    max_snap = float(np.max(snap_distances)) if n_tri_nodes else 0.0
+    unique_matches = len(set(matched_mesh_node_ids))
+    print(f"  Node snapping: {n_tri_nodes} triangulation nodes matched to "
+          f"{unique_matches} FEM nodes")
+    print(f"  Snap distance: mean={mean_snap:.6g}, max={max_snap:.6g}")
 
     # ------------------------------------------------------------------
-    # 5.  FEM-node KD-tree for hole interpolation  (undeformed positions)
-    # ------------------------------------------------------------------
-    fem_node_tree = cKDTree(nodes_undef_arr)
-    K_HOLE = min(20, n_fe_nodes)
-
-    def _hole_interpolate(x0: float, y0: float, ti: int) -> tuple:
-        """
-        IDW (power=2) interpolation of the DISPLACEMENT from the K nearest
-        FEM nodes, then applied to the tri node's own undeformed position.
-
-        This guarantees that at ti=0 (zero displacement) the tri node stays
-        exactly at its undeformed coordinates (x0, y0), avoiding any
-        spurious deformation in the reference configuration.
-        """
-        dists, idxs = fem_node_tree.query([x0, y0], k=K_HOLE)
-        if np.isscalar(idxs):
-            idxs  = np.array([idxs])
-            dists = np.array([dists])
-
-        ti_nodes = DATA_C2['nodes_time'][ti]
-
-        eps     = 1e-10
-        weights = 1.0 / (dists ** 2 + eps)
-        weights /= weights.sum()
-
-        # Interpolate displacement (deformed - undeformed) of nearby FEM nodes
-        ux = float(np.dot(weights,
-                          [ti_nodes[str(int(idx) + 1)][0] - nodes_undef_arr[int(idx), 0]
-                           for idx in idxs]))
-        uy = float(np.dot(weights,
-                          [ti_nodes[str(int(idx) + 1)][1] - nodes_undef_arr[int(idx), 1]
-                           for idx in idxs]))
-
-        return x0 + ux, y0 + uy
-
-    # ------------------------------------------------------------------
-    # 6.  Pre-compute ORIGINAL (undeformed) element areas from the scaled
-    #     triangulation node positions
+    # 3.  Area helper
     # ------------------------------------------------------------------
     def _tri_area(p1, p2, p3) -> float:
         return 0.5 * abs(
@@ -1025,8 +937,8 @@ def create_PKL_T1(
     original_areas = {}
 
     # ------------------------------------------------------------------
-    # 7.  Main time-loop: map every triangulation node to deformed coords,
-    #     then compute element areas
+    # 4.  Main time-loop: copy matched FEM node coordinates, then compute
+    #     triangulation element areas.
     # ------------------------------------------------------------------
     n_timesteps = len(DATA_C2['nodes_time'])
 
@@ -1035,36 +947,27 @@ def create_PKL_T1(
     elements_area          = {eid + 1: {} for eid in range(n_tri_elems)}
     elements_area_norm     = {eid + 1: {} for eid in range(n_tri_elems)}
 
-    def _get_element_nodes_deformed(ek: str, ti: int) -> np.ndarray:
-        """Return shape (n_en, 2) array of deformed node positions."""
-        ti_nodes = DATA_C2['nodes_time'][ti]
-        return np.array([ti_nodes[str(n)] for n in DATA_C2['elements'][ek]],
-                        dtype=float)
-
     for ti in range(n_timesteps):
-        # --- 7a. deformed triangulation node positions ---
+        # --- 4a. snapped triangulation node positions ---
+        ti_nodes = DATA_C2['nodes_time'][ti]
         deformed_tri = np.empty((n_tri_nodes, 2), dtype=float)
 
         for nidx in range(n_tri_nodes):
-            x0, y0, node_ID = tri_nodes_scaled[nidx]
-
-            if node_in_hole[nidx]:
-                x_def, y_def = _hole_interpolate(x0, y0, ti)
-            else:
-                ek = node_elem_cache[nidx]
-                xi, eta = node_natural_cache[nidx]
-                nodes_def = _get_element_nodes_deformed(ek, ti)
-                n_en = len(DATA_C2['elements'][ek])
-                N = _shape_functions_tri(xi, eta) if n_en == 3 \
-                    else _shape_functions_quad(xi, eta)
-                x_def = float(N @ nodes_def[:, 0])
-                y_def = float(N @ nodes_def[:, 1])
+            node_ID = tri_node_ids[nidx]
+            mesh_node_id = matched_mesh_node_ids[nidx]
+            mesh_node_key = str(mesh_node_id)
+            if mesh_node_key not in ti_nodes:
+                raise KeyError(
+                    f"DATA_C2['nodes_time'][{ti}] has no coordinates for "
+                    f"snapped FEM node {mesh_node_key}"
+                )
+            x_def, y_def = ti_nodes[mesh_node_key]
 
             deformed_tri[nidx] = (x_def, y_def)
             # 1-based node id in output
-            nodes_out[ti][nidx + 1] = (x_def, y_def, tri_nodes_scaled[nidx][2])
+            nodes_out[ti][nidx + 1] = (float(x_def), float(y_def), node_ID)
 
-        # --- 7b. element areas ---
+        # --- 4b. element areas ---
         for elem_id_0, (n1, n2, n3) in enumerate(tri_elements_raw):
             eid = elem_id_0 + 1
             area = _tri_area(
@@ -1081,9 +984,9 @@ def create_PKL_T1(
         print(f"  Timestep {ti + 1}/{n_timesteps} done")
 
     # ------------------------------------------------------------------
-    # 8.  Assemble PKL_T1
+    # 5.  Assemble PKL_T1
     # ------------------------------------------------------------------
-    # elements dict: 1-based element_id -> [n1, n2, n3]
+    # elements dict: 1-based element_id -> [n1, n2, n3] using 0-based node indices
     elements_out = {eid + 1: tri_elements_raw[eid]
                     for eid in range(n_tri_elems)}
 
@@ -1093,10 +996,11 @@ def create_PKL_T1(
         'elements'                 : elements_out,
         'elements_area'            : elements_area,
         'elements_area_normalized' : elements_area_norm,
+        'node_matches'             : node_matches,
     }
 
     # ------------------------------------------------------------------
-    # 9.  Save to pickle
+    # 6.  Save to pickle
     # ------------------------------------------------------------------
     if output_path is None:
         output_path = f'I001_Results/DATA_PICK_{sim_num:03d}_T1.pkl'
@@ -1172,16 +1076,30 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
                            Jacobian determinant J = det(F).
         'C'              -> dict { elem_id -> { ti -> [[...],[...]] } }
                            Isochoric RIGHT Cauchy-Green tensor
-                           C = J^(-2/3) * F @ F^T  (2x2 matrix).
+                           C = J^(-2/3) * F^T @ F  (2x2 matrix).
         'w'              -> dict { (K, G, m, n) -> { elem_id -> { ti -> float } } }
                            Neo-Hookean-like strain energy density.
                            w = K/4*(1/m^2*(J^m-1)^2 + 1/m^2*(J^(-m)-1)^2)
                              + G/4*(1/n^2*||C^n-I||_F^2 + 1/n^2*||C^(-n)-I||_F^2)
                            Keyed by parameter tuple (K, G, m, n).
-                           Currently computed for (K=1, G=1, m=1, n=1).
+                           Defaults to (K=1, G=1, m=1, n=1).
         'w_mean'         -> dict { (K, G, m, n) -> list[float]  len=N_t }
                            Mean of w across all elements at each timestep,
                            for each parameter set.
+        'w_std'          -> dict { (K, G, m, n) -> list[float]  len=N_t }
+                           Standard deviation of w across all elements at each
+                           timestep.
+        'w_cv'           -> dict { (K, G, m, n) -> list[float]  len=N_t }
+                           Coefficient of variation of w:
+                           w_std / (abs(w_mean) + eps).
+        'w_std_area_weighted'
+                         -> dict { (K, G, m, n) -> list[float]  len=N_t }
+                           Reference-area-weighted standard deviation of w,
+                           using A_e(t=0) as weights.
+        'w_cv_area_weighted'
+                         -> dict { (K, G, m, n) -> list[float]  len=N_t }
+                           Reference-area-weighted coefficient of variation:
+                           w_std_area_weighted / (abs(W/sum_e A_e(t=0)) + eps).
         'W'              -> dict { (K, G, m, n) -> list[float]  len=N_t }
                            Area-weighted sum: W(ti) = sum_e( w[e,ti] * A_e(t=0) ),
                            for each parameter set.
@@ -1413,12 +1331,59 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
         ]
         for params in _w_param_sets
     }
+    w_std = {
+        params: [
+            float(np.std([w[params][eid][ti] for eid in elem_ids]))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+    _cv_eps = 1e-30
+    w_cv = {
+        params: [
+            float(w_std[params][ti] / (abs(w_mean[params][ti]) + _cv_eps))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
 
     # W = sum_e( w[e, ti] * area_e(t=0) )  for each timestep
     _area0 = {eid: float(DATA_T1['elements_area'][eid][0]) for eid in elem_ids}
+    _area0_sum = float(sum(_area0.values()))
+    if _area0_sum <= 1e-30:
+        _area0_sum = 1e-30
     W = {
         params: [
             float(sum(w[params][eid][ti] * _area0[eid] for eid in elem_ids))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+    _w_area_mean = {
+        params: [
+            float(W[params][ti] / _area0_sum)
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+    w_std_area_weighted = {
+        params: [
+            float(np.sqrt(
+                sum(
+                    _area0[eid] * (w[params][eid][ti] - _w_area_mean[params][ti])**2
+                    for eid in elem_ids
+                ) / _area0_sum
+            ))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+    w_cv_area_weighted = {
+        params: [
+            float(
+                w_std_area_weighted[params][ti]
+                / (abs(_w_area_mean[params][ti]) + _cv_eps)
+            )
             for ti in range(n_t)
         ]
         for params in _w_param_sets
@@ -1450,6 +1415,10 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
         'C'          : C_iso,
         'w'          : w,
         'w_mean'     : w_mean,
+        'w_std'      : w_std,
+        'w_cv'       : w_cv,
+        'w_std_area_weighted': w_std_area_weighted,
+        'w_cv_area_weighted' : w_cv_area_weighted,
         'W'          : W,
     }
 
@@ -1457,7 +1426,7 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
     # 8.  Save to pickle
     # ------------------------------------------------------------------
     if output_path is None and sim_num is not None:
-        output_path = f'I001_Results/DATA_PICK_{sim_num:04d}_T2.pkl'
+        output_path = f'I001_Results/DATA_PICK_{sim_num:03d}_T2.pkl'
 
     if output_path is not None:
         out_dir = os.path.dirname(output_path)
@@ -2790,7 +2759,7 @@ def process_simulation(args):
                             data_T2 = create_PKL_T2(
                                 data_T1,
                                 sim_num=i,
-                                output_path=f'I001_Results/DATA_PICK_{i:04d}_T2_{ext_T1s:03d}.pkl',
+                                output_path=f'I001_Results/DATA_PICK_{i:03d}_T2_{ext_T1s:03d}.pkl',
                                 w_param_sets= [(1,1,1,1), (1, 1, 2, 2)]
                             )
                             del data_T2
@@ -2812,7 +2781,7 @@ def process_simulation(args):
                     data_T2 = create_PKL_T2(
                         data_T1,
                         sim_num=i,
-                        output_path=f'I001_Results/DATA_PICK_{i:04d}_T2_{ext_T1s:03d}.pkl',
+                        output_path=f'I001_Results/DATA_PICK_{i:03d}_T2_{ext_T1s:03d}.pkl',
                         w_param_sets= [(1,1,1,1),(1, 1, 2, 2)]
                     )
                     del data_T1, data_T2
