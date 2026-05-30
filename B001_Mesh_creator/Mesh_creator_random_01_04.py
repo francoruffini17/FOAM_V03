@@ -31,18 +31,21 @@ cfg = MeshConfigRand(
 )
 
 
-preview_random_mesh(
-    config=cfg,
-    allow_cut_left=False,
-    allow_cut_right=False,
-    allow_cut_bottom=False,
-    allow_cut_top=False,
-    periodic="both",
-    edge_left=0.01,
-    edge_right=0.01,
-    edge_bottom=0.01,
-    edge_top=0.01,
-)
+# preview_random_mesh(
+#     config=cfg,
+#     allow_cut_left=False,
+#     allow_cut_right=False,
+#     allow_cut_bottom=False,
+#     allow_cut_top=False,
+#     periodic="both",
+#     edge_left=0.01,
+#     edge_right=0.01,
+#     edge_bottom=0.01,
+#     edge_top=0.01,
+# )
+
+
+
 
 
 
@@ -142,3 +145,29 @@ preview_random_mesh(
 #     edge_bottom=0.01,
 #     edge_top=0.01,
 # )
+
+
+
+
+mesh_path = f"C001_Mesh_files/R005.mesh.json"
+
+generator, mesh = create_random_mesh(
+    config=cfg,
+    filepath=mesh_path,
+    export_mesh=True,
+    show_plot=False,
+    show_periodic_matching=False,
+    allow_cut_left=False,
+    allow_cut_right=False,
+    allow_cut_bottom=False,
+    allow_cut_top=False,
+    element_type="BOTH",
+    elements_around_hole=80,
+    mesh_size_factor=2.04,
+    periodic="both",
+    edge_left=0.01,
+    edge_right=0.01,
+    edge_bottom=0.01,
+    edge_top=0.01,
+)
+

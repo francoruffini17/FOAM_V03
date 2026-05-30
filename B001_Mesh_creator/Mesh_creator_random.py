@@ -194,53 +194,53 @@ cfg = MeshConfigRand(
 
 
 
-# mesh_path = f"C001_Mesh_files/R001.mesh.json"
+mesh_path = f"C001_Mesh_files/R001.mesh.json"
 
-# generator, mesh = create_random_mesh(
-#     config=cfg,
-#     filepath=mesh_path,
-#     export_mesh=True,
-#     show_plot=True,
-#     show_periodic_matching=True,
-#     allow_cut_left=False,
-#     allow_cut_right=False,
-#     allow_cut_bottom=False,
-#     allow_cut_top=False,
-#     element_type="BOTH",
-#     elements_around_hole=48,
-#     mesh_size_factor=2,
-#     periodic="both",
-#     edge_left=0.01,
-#     edge_right=0.01,
-#     edge_bottom=0.01,
-#     edge_top=0.01,
-# )
-
-
+generator, mesh = create_random_mesh(
+    config=cfg,
+    filepath=mesh_path,
+    export_mesh=True,
+    show_plot=True,
+    show_periodic_matching=True,
+    allow_cut_left=False,
+    allow_cut_right=False,
+    allow_cut_bottom=False,
+    allow_cut_top=False,
+    element_type="BOTH",
+    elements_around_hole=48,
+    mesh_size_factor=2,
+    periodic="both",
+    edge_left=0.01,
+    edge_right=0.01,
+    edge_bottom=0.01,
+    edge_top=0.01,
+)
 
 
 
-# mesh_path = f"C001_Mesh_files/R002.mesh.json"
 
-# generator, mesh = create_random_mesh(
-#     config=cfg,
-#     filepath=mesh_path,
-#     export_mesh=True,
-#     show_plot=True,
-#     show_periodic_matching=True,
-#     allow_cut_left=False,
-#     allow_cut_right=False,
-#     allow_cut_bottom=False,
-#     allow_cut_top=False,
-#     element_type="BOTH",
-#     elements_around_hole=48/1.5,
-#     mesh_size_factor=2.7,
-#     periodic="both",
-#     edge_left=0.01,
-#     edge_right=0.01,
-#     edge_bottom=0.01,
-#     edge_top=0.01,
-# )
+
+mesh_path = f"C001_Mesh_files/R002.mesh.json"
+
+generator, mesh = create_random_mesh(
+    config=cfg,
+    filepath=mesh_path,
+    export_mesh=True,
+    show_plot=True,
+    show_periodic_matching=True,
+    allow_cut_left=False,
+    allow_cut_right=False,
+    allow_cut_bottom=False,
+    allow_cut_top=False,
+    element_type="BOTH",
+    elements_around_hole=48/1.5,
+    mesh_size_factor=2.7,
+    periodic="both",
+    edge_left=0.01,
+    edge_right=0.01,
+    edge_bottom=0.01,
+    edge_top=0.01,
+)
 
 
 

@@ -102,21 +102,46 @@ cfg = MeshConfig(domain_size=1.0, n_holes_width=10, porosity=0.572)
 
 
 
-mesh_path = f"C001_Mesh_files/A004.mesh.json"
+# mesh_path = f"C001_Mesh_files/A004.mesh.json"
+
+# generator, mesh = create_hexagonal_mesh_2(
+#     config=cfg,
+#     filepath=mesh_path,
+#     export_mesh=True,
+#     show_plot=True,
+#     show_periodic_matching=False,
+#     allow_cut_left=False,
+#     allow_cut_right=False,
+#     allow_cut_bottom=False,
+#     allow_cut_top=False,
+#     element_type="BOTH",
+#     elements_around_hole=24,
+#     mesh_size_factor=2,
+#     periodic="both",
+#     edge_left=0.01,
+#     edge_right=0.01,
+#     edge_bottom=0.01,
+#     edge_top=0.01,
+# )
+
+
+
+
+mesh_path = f"C001_Mesh_files/A005.mesh.json"
 
 generator, mesh = create_hexagonal_mesh_2(
     config=cfg,
     filepath=mesh_path,
     export_mesh=True,
-    show_plot=True,
+    show_plot=False,
     show_periodic_matching=False,
     allow_cut_left=False,
     allow_cut_right=False,
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    elements_around_hole=24,
-    mesh_size_factor=2,
+    elements_around_hole=80,
+    mesh_size_factor=1.305,
     periodic="both",
     edge_left=0.01,
     edge_right=0.01,

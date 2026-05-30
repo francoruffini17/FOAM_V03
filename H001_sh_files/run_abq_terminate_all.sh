@@ -4,6 +4,41 @@ set -euo pipefail
 
 LOCK_EXT=".lck"
 LOCK_PATHS=()
+ABQ_CMD="${ABQ_CMD:-}"
+
+resolve_abq_cmd() {
+    local candidate resolved
+
+    if [[ -n "$ABQ_CMD" ]]; then
+        if [[ -x "$ABQ_CMD" ]]; then
+            return 0
+        fi
+        if resolved="$(command -v "$ABQ_CMD" 2>/dev/null)"; then
+            ABQ_CMD="$resolved"
+            return 0
+        fi
+        printf "Error: Abaqus command '%s' was not found or is not executable.\n" "$ABQ_CMD" >&2
+        return 1
+    fi
+
+    for candidate in \
+        "abq" \
+        "/var/DassaultSystemes/SIMULIA/Commands/abq" \
+        "abaqus"
+    do
+        if [[ -x "$candidate" ]]; then
+            ABQ_CMD="$candidate"
+            return 0
+        fi
+        if resolved="$(command -v "$candidate" 2>/dev/null)"; then
+            ABQ_CMD="$resolved"
+            return 0
+        fi
+    done
+
+    printf "Error: Abaqus command not found. Try passing ABQ_CMD=/path/to/abq.\n" >&2
+    return 1
+}
 
 collect_lock_paths() {
     local lock_files;
@@ -53,7 +88,7 @@ terminate_abq_job() {
         return 1
     fi
 
-    if ! abq job="$job_name" terminate; then
+    if ! "$ABQ_CMD" job="$job_name" terminate; then
         printf "Error: Failed to terminate job '%s'\n" "$job_name" >&2
         cd - >/dev/null || return 1
         return 1
@@ -63,6 +98,11 @@ terminate_abq_job() {
 }
 
 main() {
+    if ! resolve_abq_cmd; then
+        return 1
+    fi
+    printf "Using Abaqus command: %s\n" "$ABQ_CMD"
+
     if ! collect_lock_paths; then
         return 1
     fi

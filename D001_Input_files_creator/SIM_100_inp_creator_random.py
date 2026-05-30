@@ -27,7 +27,7 @@ P = 0.08
 sim_num = 100
 
 
-for i in range(1,5):
+for i in range(1,6):
     mesh_file = f'R{i:03d}.mesh.json'
     os.makedirs('I001_Results/OBJ_files', exist_ok=True)
 
