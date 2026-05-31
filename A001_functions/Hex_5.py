@@ -2792,11 +2792,19 @@ class MeshConfig:
     Attributes:
         domain_size: Side length of the square domain.
         n_holes_width: Number of holes across the width of the domain.
-        porosity: Target porosity (hole area / total area) for the unit cell.
+        porosity: Target porosity (hole area / total area) for the unit cell,
+            relative to the active (inner) domain excluding solid edge strips.
+        edge_left/right/bottom/top: Width of solid edge strips to add outside
+            the porous zone.  Moved here from the meshing-function call so
+            that porosity is always interpreted relative to the inner domain.
     """
     domain_size: float
     n_holes_width: int
     porosity: float
+    edge_left: float = 0.0
+    edge_right: float = 0.0
+    edge_bottom: float = 0.0
+    edge_top: float = 0.0
 
 
 def create_hexagonal_mesh(
@@ -3044,6 +3052,7 @@ class HexagonalMeshGenerator2(HexagonalMeshGenerator):
         self,
         elements_around_hole: int = 24,
         mesh_size_factor: float = 1.0,
+        mesh_size: float = None,
         algorithm: str = 'auto',
         element_type: str = 'QUAD',
         edge_padding: Dict[str, float] = None,
@@ -3100,13 +3109,16 @@ class HexagonalMeshGenerator2(HexagonalMeshGenerator):
         _want_periodic_tb = periodic_tb
 
         # --- mesh sizing -------------------------------------------------------
-        circumference = 2 * np.pi * self.geometry.hole_radius
-        mesh_size_hole = circumference / elements_around_hole * mesh_size_factor
-
-        mesh_size_bg = min(
-            self.geometry.get_minimum_ligament() / 3,
-            self.horizontal_spacing / 4,
-        ) * mesh_size_factor
+        if mesh_size is not None:
+            mesh_size_hole = float(mesh_size)
+            mesh_size_bg   = float(mesh_size)
+        else:
+            circumference = 2 * np.pi * self.geometry.hole_radius
+            mesh_size_hole = circumference / elements_around_hole * mesh_size_factor
+            mesh_size_bg = min(
+                self.geometry.get_minimum_ligament() / 3,
+                self.horizontal_spacing / 4,
+            ) * mesh_size_factor
 
         L = self.domain_size
         r = self.geometry.hole_radius
@@ -3236,7 +3248,15 @@ class HexagonalMeshGenerator2(HexagonalMeshGenerator):
             gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 0)   # Keep remaining tris
 
         # Size field for refinement near hole arcs
-        if hole_curve_tags:
+        if mesh_size is not None:
+            # Uniform mesh: disable Gmsh geometric size hints and enforce
+            # a constant global size so all elements are the same target size.
+            gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeMin", mesh_size_hole)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size_bg)
+        elif hole_curve_tags:
             gmsh.model.mesh.field.add("Distance", 1)
             gmsh.model.mesh.field.setNumbers(1, "CurvesList", hole_curve_tags)
             gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
@@ -4094,15 +4114,16 @@ def create_hexagonal_mesh_2(
     show_periodic_matching: bool = False,
     elements_around_hole: int = 24,
     mesh_size_factor: float = 1.0,
+    mesh_size: float = None,
     allow_cut_left: bool = True,
     allow_cut_right: bool = True,
     allow_cut_bottom: bool = True,
     allow_cut_top: bool = True,
     element_type: str = "QUAD",
-    edge_left: float = 0.0,
-    edge_right: float = 0.0,
-    edge_bottom: float = 0.0,
-    edge_top: float = 0.0,
+    edge_left: float = None,
+    edge_right: float = None,
+    edge_bottom: float = None,
+    edge_top: float = None,
     periodic: str = "none",
 ):
     """
@@ -4125,11 +4146,13 @@ def create_hexagonal_mesh_2(
         allow_cut_top=allow_cut_top,
     )
 
-    # --- compute edge padding ------------------------------------------------
-    w_l = float(edge_left)   if edge_left   else 0.0
-    w_r = float(edge_right)  if edge_right  else 0.0
-    w_b = float(edge_bottom) if edge_bottom else 0.0
-    w_t = float(edge_top)    if edge_top    else 0.0
+    # --- compute edge padding -----------------------------------------------
+    # Function-level arguments take precedence; fall back to config fields so
+    # that edges can be co-located with the porosity specification.
+    w_l = float(edge_left   if edge_left   is not None else getattr(config, 'edge_left',   0.0))
+    w_r = float(edge_right  if edge_right  is not None else getattr(config, 'edge_right',  0.0))
+    w_b = float(edge_bottom if edge_bottom is not None else getattr(config, 'edge_bottom', 0.0))
+    w_t = float(edge_top    if edge_top    is not None else getattr(config, 'edge_top',    0.0))
     has_strips = bool(w_l or w_r or w_b or w_t)
 
     padding = ({"left": w_l, "right": w_r, "bottom": w_b, "top": w_t}
@@ -4143,6 +4166,7 @@ def create_hexagonal_mesh_2(
     mesh = generator.generate_mesh(
         elements_around_hole=elements_around_hole,
         mesh_size_factor=mesh_size_factor,
+        mesh_size=mesh_size,
         element_type=element_type,
         edge_padding=padding,
         periodic_lr=periodic_lr,
@@ -4455,12 +4479,16 @@ class MeshConfigRand:
 
     Attributes:
         domain_size: Side length of the square domain.
-        porosity: Target porosity (hole area / total area).
+        porosity: Target porosity (hole area / inner area), where inner area
+            excludes the solid edge strips.
         min_hole_size: Minimum hole **diameter**.
         max_hole_size: Maximum hole **diameter**.
         min_distance_between_holes: Minimum edge-to-edge distance between
             holes.  ``0`` means overlap is allowed.
         seed: Random seed for reproducible results.
+        edge_left/right/bottom/top: Width of solid edge strips to add outside
+            the porous zone.  Moved here from the meshing-function call so
+            that porosity is always interpreted relative to the inner domain.
     """
     domain_size: float
     porosity: float
@@ -4468,6 +4496,10 @@ class MeshConfigRand:
     max_hole_size: float        # diameter
     min_distance_between_holes: float
     seed: int
+    edge_left: float = 0.0
+    edge_right: float = 0.0
+    edge_bottom: float = 0.0
+    edge_top: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -4746,6 +4778,10 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         allow_cut_top: bool = True,
         periodic_lr: bool = False,
         periodic_tb: bool = False,
+        edge_left: float = 0.0,
+        edge_right: float = 0.0,
+        edge_bottom: float = 0.0,
+        edge_top: float = 0.0,
     ):
         # Store parameters (do NOT call super().__init__ because that
         # computes hexagonal geometry).
@@ -4760,6 +4796,10 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         self.allow_cut_right = allow_cut_right
         self.allow_cut_bottom = allow_cut_bottom
         self.allow_cut_top = allow_cut_top
+        self.edge_left   = float(edge_left)
+        self.edge_right  = float(edge_right)
+        self.edge_bottom = float(edge_bottom)
+        self.edge_top    = float(edge_top)
 
         # Place holes
         self.hole_centers, self.hole_radii = self._place_random_holes(
@@ -4818,7 +4858,11 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
 
         rng = np.random.default_rng(self.seed)
         L = self.domain_size
-        target_area = self.porosity * L * L
+        # Porosity is relative to the inner (active) domain, i.e. excluding
+        # the solid edge strips stored in self.edge_*.
+        inner_w = max(L - self.edge_left - self.edge_right,  L * 0.01)
+        inner_h = max(L - self.edge_bottom - self.edge_top,  L * 0.01)
+        target_area = self.porosity * inner_w * inner_h
 
         min_r = self.min_hole_radius
         max_r = self.max_hole_radius
@@ -5201,6 +5245,7 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         self,
         elements_around_hole: int = 24,
         mesh_size_factor: float = 1.0,
+        mesh_size: float = None,
         algorithm: str = 'auto',
         element_type: str = 'QUAD',
         edge_padding: Dict[str, float] = None,
@@ -5227,15 +5272,20 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         _want_periodic_tb = periodic_tb
 
         # --- mesh sizing ---------------------------------------------------
-        min_r = float(np.min(self.hole_radii)) if len(self.hole_radii) else 0.01
-        circumference = 2 * np.pi * min_r
-        mesh_size_hole = circumference / elements_around_hole * mesh_size_factor
-
-        min_lig = self.get_minimum_ligament()
-        mesh_size_bg = min(
-            min_lig / 3.0,
-            self.domain_size / 20.0,
-        ) * mesh_size_factor
+        if mesh_size is not None:
+            mesh_size_hole = float(mesh_size)
+            mesh_size_bg   = float(mesh_size)
+            min_lig = self.get_minimum_ligament()
+            min_r   = float(np.min(self.hole_radii)) if len(self.hole_radii) else 0.01
+        else:
+            min_r = float(np.min(self.hole_radii)) if len(self.hole_radii) else 0.01
+            circumference = 2 * np.pi * min_r
+            mesh_size_hole = circumference / elements_around_hole * mesh_size_factor
+            min_lig = self.get_minimum_ligament()
+            mesh_size_bg = min(
+                min_lig / 3.0,
+                self.domain_size / 20.0,
+            ) * mesh_size_factor
 
         L = self.domain_size
 
@@ -5348,7 +5398,15 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
             gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 0)
 
         # Size field
-        if hole_curve_tags:
+        if mesh_size is not None:
+            # Uniform mesh: disable Gmsh geometric size hints and enforce
+            # a constant global size so all elements are the same target size.
+            gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeMin", mesh_size_hole)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size_bg)
+        elif hole_curve_tags:
             gmsh.model.mesh.field.add("Distance", 1)
             gmsh.model.mesh.field.setNumbers(1, "CurvesList", hole_curve_tags)
             gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
@@ -5630,10 +5688,10 @@ def preview_random_mesh(
     allow_cut_bottom: bool = True,
     allow_cut_top: bool = True,
     periodic: str = "none",
-    edge_left: float = 0.0,
-    edge_right: float = 0.0,
-    edge_bottom: float = 0.0,
-    edge_top: float = 0.0,
+    edge_left: float = None,
+    edge_right: float = None,
+    edge_bottom: float = None,
+    edge_top: float = None,
     figsize: Tuple[float, float] = (8, 8),
     title: str = None,
 ):
@@ -5667,6 +5725,11 @@ def preview_random_mesh(
     periodic_lr = _periodic in ("lr", "both")
     periodic_tb = _periodic in ("tb", "both")
 
+    w_l = float(edge_left   if edge_left   is not None else getattr(config, 'edge_left',   0.0))
+    w_r = float(edge_right  if edge_right  is not None else getattr(config, 'edge_right',  0.0))
+    w_b = float(edge_bottom if edge_bottom is not None else getattr(config, 'edge_bottom', 0.0))
+    w_t = float(edge_top    if edge_top    is not None else getattr(config, 'edge_top',    0.0))
+
     generator = RandomMeshGenerator(
         domain_size=config.domain_size,
         porosity=config.porosity,
@@ -5680,13 +5743,13 @@ def preview_random_mesh(
         allow_cut_top=allow_cut_top,
         periodic_lr=periodic_lr,
         periodic_tb=periodic_tb,
+        edge_left=w_l,
+        edge_right=w_r,
+        edge_bottom=w_b,
+        edge_top=w_t,
     )
 
     # --- rescale if edge strips are used -----------------------------------
-    w_l = float(edge_left)   if edge_left   else 0.0
-    w_r = float(edge_right)  if edge_right  else 0.0
-    w_b = float(edge_bottom) if edge_bottom else 0.0
-    w_t = float(edge_top)    if edge_top    else 0.0
     has_strips = bool(w_l or w_r or w_b or w_t)
 
     L = config.domain_size
@@ -5771,15 +5834,16 @@ def create_random_mesh(
     show_periodic_matching: bool = False,
     elements_around_hole: int = 24,
     mesh_size_factor: float = 1.0,
+    mesh_size: float = None,
     allow_cut_left: bool = True,
     allow_cut_right: bool = True,
     allow_cut_bottom: bool = True,
     allow_cut_top: bool = True,
     element_type: str = "QUAD",
-    edge_left: float = 0.0,
-    edge_right: float = 0.0,
-    edge_bottom: float = 0.0,
-    edge_top: float = 0.0,
+    edge_left: float = None,
+    edge_right: float = None,
+    edge_bottom: float = None,
+    edge_top: float = None,
     periodic: str = "none",
 ):
     """
@@ -5795,6 +5859,17 @@ def create_random_mesh(
     periodic_lr = _periodic in ("lr", "both")
     periodic_tb = _periodic in ("tb", "both")
 
+    # --- edge padding (read from config if not provided as arguments) ------
+    # Function-level arguments take precedence; fall back to config fields so
+    # that edges are co-located with the porosity specification.
+    w_l = float(edge_left   if edge_left   is not None else getattr(config, 'edge_left',   0.0))
+    w_r = float(edge_right  if edge_right  is not None else getattr(config, 'edge_right',  0.0))
+    w_b = float(edge_bottom if edge_bottom is not None else getattr(config, 'edge_bottom', 0.0))
+    w_t = float(edge_top    if edge_top    is not None else getattr(config, 'edge_top',    0.0))
+    has_strips = bool(w_l or w_r or w_b or w_t)
+    padding = ({"left": w_l, "right": w_r, "bottom": w_b, "top": w_t}
+               if has_strips else None)
+
     # --- build generator & place holes -------------------------------------
     generator = RandomMeshGenerator(
         domain_size=config.domain_size,
@@ -5809,25 +5884,20 @@ def create_random_mesh(
         allow_cut_top=allow_cut_top,
         periodic_lr=periodic_lr,
         periodic_tb=periodic_tb,
+        edge_left=w_l,
+        edge_right=w_r,
+        edge_bottom=w_b,
+        edge_top=w_t,
     )
 
     print(f"Random holes placed: {len(generator.hole_centers)} holes "
           f"(seed={config.seed})")
 
-    # --- edge padding ------------------------------------------------------
-    w_l = float(edge_left)   if edge_left   else 0.0
-    w_r = float(edge_right)  if edge_right  else 0.0
-    w_b = float(edge_bottom) if edge_bottom else 0.0
-    w_t = float(edge_top)    if edge_top    else 0.0
-    has_strips = bool(w_l or w_r or w_b or w_t)
-
-    padding = ({"left": w_l, "right": w_r, "bottom": w_b, "top": w_t}
-               if has_strips else None)
-
     # --- generate FE mesh --------------------------------------------------
     mesh = generator.generate_mesh(
         elements_around_hole=elements_around_hole,
         mesh_size_factor=mesh_size_factor,
+        mesh_size=mesh_size,
         element_type=element_type,
         edge_padding=padding,
         periodic_lr=periodic_lr,

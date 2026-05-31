@@ -20,34 +20,29 @@ from A001_functions.Hex_5 import (
 
 
 
-cfg = MeshConfig(domain_size=1.0, n_holes_width=10, porosity=0.572)
+cfg = MeshConfig(domain_size=1.0, n_holes_width=10, porosity=0.572,
+                  edge_left=0.01, edge_right=0.01, edge_bottom=0.01, edge_top=0.01)
 
 
 
+mesh_path = f"C001_Mesh_files/A020.mesh.json"
+
+generator, mesh = create_hexagonal_mesh_2(
+    config=cfg,
+    filepath=mesh_path,
+    export_mesh=True,
+    show_plot=True,
+    show_periodic_matching=False,
+    allow_cut_left=False,
+    allow_cut_right=False,
+    allow_cut_bottom=False,
+    allow_cut_top=False,
+    element_type="BOTH",
+    mesh_size=0.004,
+    periodic="both",
+)
 
 
-
-# mesh_path = f"C001_Mesh_files/A001.mesh.json"
-
-# generator, mesh = create_hexagonal_mesh_2(
-#     config=cfg,
-#     filepath=mesh_path,
-#     export_mesh=True,
-#     show_plot=True,
-#     show_periodic_matching=False,
-#     allow_cut_left=False,
-#     allow_cut_right=False,
-#     allow_cut_bottom=False,
-#     allow_cut_top=False,
-#     element_type="BOTH",
-#     elements_around_hole=48,
-#     mesh_size_factor=1.12,
-#     periodic="both",
-#     edge_left=0.01,
-#     edge_right=0.01,
-#     edge_bottom=0.01,
-#     edge_top=0.01,
-# )
 
 
 
@@ -66,13 +61,8 @@ cfg = MeshConfig(domain_size=1.0, n_holes_width=10, porosity=0.572)
 #     allow_cut_bottom=False,
 #     allow_cut_top=False,
 #     element_type="BOTH",
-#     elements_around_hole=32,
-#     mesh_size_factor=1.2,
+#     mesh_size=0.006,
 #     periodic="both",
-#     edge_left=0.01,
-#     edge_right=0.01,
-#     edge_bottom=0.01,
-#     edge_top=0.01,
 # )
 
 
@@ -91,13 +81,8 @@ cfg = MeshConfig(domain_size=1.0, n_holes_width=10, porosity=0.572)
 #     allow_cut_bottom=False,
 #     allow_cut_top=False,
 #     element_type="BOTH",
-#     elements_around_hole=24,
-#     mesh_size_factor=1.4,
+#     mesh_size=0.010,
 #     periodic="both",
-#     edge_left=0.01,
-#     edge_right=0.01,
-#     edge_bottom=0.01,
-#     edge_top=0.01,
 # )
 
 
@@ -115,13 +100,8 @@ cfg = MeshConfig(domain_size=1.0, n_holes_width=10, porosity=0.572)
 #     allow_cut_bottom=False,
 #     allow_cut_top=False,
 #     element_type="BOTH",
-#     elements_around_hole=24,
-#     mesh_size_factor=2,
+#     mesh_size=0.020,
 #     periodic="both",
-#     edge_left=0.01,
-#     edge_right=0.01,
-#     edge_bottom=0.01,
-#     edge_top=0.01,
 # )
 
 
@@ -140,11 +120,6 @@ generator, mesh = create_hexagonal_mesh_2(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    elements_around_hole=80,
-    mesh_size_factor=1.305,
+    mesh_size=0.004,
     periodic="both",
-    edge_left=0.01,
-    edge_right=0.01,
-    edge_bottom=0.01,
-    edge_top=0.01,
 )

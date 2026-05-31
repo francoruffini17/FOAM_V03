@@ -190,6 +190,10 @@ cfg = MeshConfigRand(
     max_hole_size=0.09,
     min_distance_between_holes=0.01,
     seed=42,
+    edge_left=0.01,
+    edge_right=0.01,
+    edge_bottom=0.01,
+    edge_top=0.01,
 )
 
 
@@ -207,13 +211,8 @@ generator, mesh = create_random_mesh(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    elements_around_hole=48,
-    mesh_size_factor=2,
+    mesh_size=0.005,
     periodic="both",
-    edge_left=0.01,
-    edge_right=0.01,
-    edge_bottom=0.01,
-    edge_top=0.01,
 )
 
 
@@ -233,13 +232,8 @@ generator, mesh = create_random_mesh(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    elements_around_hole=48/1.5,
-    mesh_size_factor=2.7,
+    mesh_size=0.010,
     periodic="both",
-    edge_left=0.01,
-    edge_right=0.01,
-    edge_bottom=0.01,
-    edge_top=0.01,
 )
 
 
@@ -258,13 +252,8 @@ generator, mesh = create_random_mesh(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    elements_around_hole=int(48/2),
-    mesh_size_factor=4,
+    mesh_size=0.020,
     periodic="both",
-    edge_left=0.01,
-    edge_right=0.01,
-    edge_bottom=0.01,
-    edge_top=0.01,
 )
 
 
@@ -282,11 +271,6 @@ generator, mesh = create_random_mesh(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    elements_around_hole=int(48/4),
-    mesh_size_factor=2*4,
+    mesh_size=0.040,
     periodic="both",
-    edge_left=0.01,
-    edge_right=0.01,
-    edge_bottom=0.01,
-    edge_top=0.01,
 )
