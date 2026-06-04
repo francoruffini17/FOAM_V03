@@ -15,14 +15,14 @@ except ModuleNotFoundError as exc:
 from A001_functions.Hex_5 import MeshConfigRand, create_random_mesh
 
 
-TARGET_NODES = [5_000, 10_000, 20_000, 40_000, 80_000]
+TARGET_NODES = [40_000, 80_000, 20_000, 10_000]
 TARGET_REL_TOL = 0.01
-N_TRIALS_PER_BATCH = 80
-MAX_TRIALS_PER_TARGET = 240
-INITIAL_REFERENCE_MESH_SIZE = 0.004
-INITIAL_REFERENCE_NODES = 37_982
-MIN_MESH_SIZE = 0.001
-MAX_MESH_SIZE = 0.03
+N_TRIALS_PER_BATCH = 40
+MAX_TRIALS_PER_TARGET = 100
+INITIAL_REFERENCE_MESH_SIZES = [ 0.0038, 0.0027, 0.0055, 0.008]
+INITIAL_REFERENCE_NODE_COUNTS = [41_862, 80_019, 21_115, 10_904]
+MIN_MESH_SIZES = [ 0.0035, 0.0025, 0.005, 0.007]
+MAX_MESH_SIZES = [ 0.004, 0.0029, 0.006, 0.0085]
 OUTPUT_TEMPLATE = "C001_Mesh_files/R030_{target_k:03d}k.mesh.json"
 
 
@@ -78,16 +78,36 @@ def evaluate_mesh_size(mesh_size):
     return result
 
 
-def initial_mesh_size_guess(target_nodes):
-    return INITIAL_REFERENCE_MESH_SIZE * (
-        INITIAL_REFERENCE_NODES / target_nodes
+def initial_mesh_size_guess(
+    target_nodes,
+    initial_reference_mesh_size,
+    initial_reference_nodes,
+):
+    return initial_reference_mesh_size * (
+        initial_reference_nodes / target_nodes
     ) ** 0.5
 
 
-def find_mesh_size_bounds(target_nodes):
-    guess = max(MIN_MESH_SIZE, min(MAX_MESH_SIZE, initial_mesh_size_guess(target_nodes)))
-    low = max(MIN_MESH_SIZE, guess / 1.5)
-    high = min(MAX_MESH_SIZE, guess * 1.5)
+def find_mesh_size_bounds(
+    target_nodes,
+    min_mesh_size,
+    max_mesh_size,
+    initial_reference_mesh_size,
+    initial_reference_nodes,
+):
+    guess = max(
+        min_mesh_size,
+        min(
+            max_mesh_size,
+            initial_mesh_size_guess(
+                target_nodes,
+                initial_reference_mesh_size,
+                initial_reference_nodes,
+            ),
+        ),
+    )
+    low = max(min_mesh_size, guess / 1.5)
+    high = min(max_mesh_size, guess * 1.5)
 
     low_eval = evaluate_mesh_size(low)
     high_eval = evaluate_mesh_size(high)
@@ -101,20 +121,20 @@ def find_mesh_size_bounds(target_nodes):
             return low, high
 
         if not has_upper_node_count:
-            if low <= MIN_MESH_SIZE:
+            if low <= min_mesh_size:
                 return low, high
             high = low
             high_eval = low_eval
-            low = max(MIN_MESH_SIZE, low / 1.5)
+            low = max(min_mesh_size, low / 1.5)
             low_eval = evaluate_mesh_size(low)
             continue
 
         if not has_lower_node_count:
-            if high >= MAX_MESH_SIZE:
+            if high >= max_mesh_size:
                 return low, high
             low = high
             low_eval = high_eval
-            high = min(MAX_MESH_SIZE, high * 1.5)
+            high = min(max_mesh_size, high * 1.5)
             high_eval = evaluate_mesh_size(high)
 
     return low, high
@@ -133,14 +153,33 @@ class StopWhenWithinTolerance:
             study.stop()
 
 
-def optimize_target(target_nodes):
-    mesh_size_low, mesh_size_high = find_mesh_size_bounds(target_nodes)
+def optimize_target(
+    target_nodes,
+    min_mesh_size,
+    max_mesh_size,
+    initial_reference_mesh_size,
+    initial_reference_nodes,
+):
+    mesh_size_low, mesh_size_high = find_mesh_size_bounds(
+        target_nodes,
+        min_mesh_size,
+        max_mesh_size,
+        initial_reference_mesh_size,
+        initial_reference_nodes,
+    )
     sampler = optuna.samplers.TPESampler(seed=42 + target_nodes)
     study = optuna.create_study(direction="minimize", sampler=sampler)
 
     guess = max(
         mesh_size_low,
-        min(mesh_size_high, initial_mesh_size_guess(target_nodes)),
+        min(
+            mesh_size_high,
+            initial_mesh_size_guess(
+                target_nodes,
+                initial_reference_mesh_size,
+                initial_reference_nodes,
+            ),
+        ),
     )
     for mesh_size in (mesh_size_low, guess, mesh_size_high):
         study.enqueue_trial({"mesh_size": mesh_size})
@@ -214,9 +253,43 @@ def optimize_target(target_nodes):
 
 
 def main():
+    list_lengths = {
+        len(TARGET_NODES),
+        len(MIN_MESH_SIZES),
+        len(MAX_MESH_SIZES),
+        len(INITIAL_REFERENCE_MESH_SIZES),
+        len(INITIAL_REFERENCE_NODE_COUNTS),
+    }
+    if len(list_lengths) != 1:
+        raise SystemExit(
+            "TARGET_NODES, MIN_MESH_SIZES, MAX_MESH_SIZES, "
+            "INITIAL_REFERENCE_MESH_SIZES, and INITIAL_REFERENCE_NODE_COUNTS "
+            "must have the same length."
+        )
+
     results = []
-    for target_nodes in TARGET_NODES:
-        results.append(optimize_target(target_nodes))
+    for (
+        target_nodes,
+        min_mesh_size,
+        max_mesh_size,
+        initial_reference_mesh_size,
+        initial_reference_nodes,
+    ) in zip(
+        TARGET_NODES,
+        MIN_MESH_SIZES,
+        MAX_MESH_SIZES,
+        INITIAL_REFERENCE_MESH_SIZES,
+        INITIAL_REFERENCE_NODE_COUNTS,
+    ):
+        results.append(
+            optimize_target(
+                target_nodes,
+                min_mesh_size,
+                max_mesh_size,
+                initial_reference_mesh_size,
+                initial_reference_nodes,
+            )
+        )
 
     print("\nSummary")
     failed = []

@@ -34,20 +34,20 @@ cfg = MeshConfigRand(
     edge_top=0.01,
 )
 
-mesh_path = f"C001_Mesh_files/R030.mesh.json"
+mesh_path = f"C001_Mesh_files/R03X.mesh.json"
 
 generator, mesh = create_random_mesh(
     config=cfg,
     filepath=mesh_path,
-    export_mesh=True,
-    show_plot=True,
+    export_mesh=False,
+    show_plot=False,
     show_periodic_matching=False,
     allow_cut_left=False,
     allow_cut_right=False,
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    mesh_size=0.004,
+    mesh_size=0.0085,
     periodic="both",
 )
 
