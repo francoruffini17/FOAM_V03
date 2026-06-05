@@ -24,7 +24,7 @@ E = 20
 P = 0.08
 
 
-sim_num = 600
+sim_num = 610
 
 factor = 2e-5
 
@@ -148,7 +148,7 @@ for mesh_file in mesh_files:
         # BC_z_p=[None, None, None, None, None, None],
         corner_xnyn_bc = [0, 0, None, None, None, None],
         corner_xpyn_bc = [None, 0, None, None, None, None],
-        BC_9999997 = [None, -5, None, None, None, None],  # prescribe DA (DOF 1) = 0.1
+        BC_9999997 = [None, -3.5, None, None, None, None],  # prescribe DA (DOF 1) = 0.1
 
 
         # --- pressure load ---

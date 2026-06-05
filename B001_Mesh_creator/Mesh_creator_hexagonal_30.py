@@ -44,6 +44,6 @@ generator, mesh = create_hexagonal_mesh_2(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    mesh_size=0.012,
+    mesh_size=0.00185,
     periodic="both",
 )

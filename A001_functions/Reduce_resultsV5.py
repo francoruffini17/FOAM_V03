@@ -38,6 +38,22 @@ def _mesh_artifact_path(mesh_prefix: str, family: str, ext_id: int, suffix: str)
     return f"C001_Mesh_files/{mesh_prefix}_{family}{ext_id:03d}.{suffix}"
 
 
+def _source_metadata(source_file):
+    """Small provenance block stored in generated pickle dictionaries."""
+    if source_file is None:
+        return {'source_file': None, 'source_files': []}
+    return {'source_file': source_file, 'source_files': [source_file]}
+
+
+def _propagate_source_metadata(source_data):
+    """Carry source-file provenance from an input pickle dictionary."""
+    source_files = list(source_data.get('source_files', []))
+    source_file = source_data.get('source_file')
+    if source_file is not None and source_file not in source_files:
+        source_files.insert(0, source_file)
+    return {'source_file': source_file, 'source_files': source_files}
+
+
 def _mesh_prefix_for_sim(sim_num: int) -> str:
     """Read the simulation JSON and derive the mesh artifact prefix."""
     json_path = f"I001_Results/OBJ_files/SIM_{sim_num:03d}.json"
@@ -309,6 +325,7 @@ def create_PKL_G2(DATA_G):
         't': DATA_G['t'],
         'global_ef_t': global_ef_t,
         'global_ef_c': global_ef_c,
+        **_propagate_source_metadata(DATA_G),
     }
     
     return pkl_G2
@@ -594,6 +611,7 @@ def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=No
         't': DATA_G['t'],
         'global_ef_t': global_ef_t,
         'global_ef_c': global_ef_c,
+        **_propagate_source_metadata(DATA_G),
     }
 
     return pkl_G2
@@ -991,6 +1009,7 @@ def create_PKL_T1(
                     for eid in range(n_tri_elems)}
 
     PKL_T1 = {
+        **_source_metadata(triangulation_file),
         't'                        : DATA_C2['t'],
         'nodes'                    : nodes_out,
         'elements'                 : elements_out,
@@ -1390,6 +1409,7 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
     }
 
     PKL_T2 = {
+        **_propagate_source_metadata(DATA_T1),
         't': t,
         'time_variant': {
             'areas'           : tv_areas,
@@ -1706,6 +1726,7 @@ def create_PKL_J1(
     # 4.  Assemble DATA_J1
     # ------------------------------------------------------------------
     DATA_J1 = {
+        **_source_metadata(graph_file_path),
         't': DATA_C2['t'][:n_timesteps],
         'nodes': nodes_data,
         'bars': bars_data,
@@ -2067,6 +2088,7 @@ def create_PKL_K1(
     # 4.  Assemble DATA_K1
     # ------------------------------------------------------------------
     DATA_K1 = {
+        **_source_metadata(gridhex_file_path),
         't': DATA_C2['t'][:n_timesteps],
         'nodes': nodes_data,
         'nodes_id': nodes_id,
@@ -2238,6 +2260,7 @@ def create_PKL_J2(
     # Assemble DATA_J2
     # ------------------------------------------------------------------
     DATA_J2 = {
+        **_propagate_source_metadata(DATA_J1),
         't': t,
         'tension': tension,
         'compression': compression,
@@ -2402,6 +2425,7 @@ def create_PKL_K2(
     # Assemble DATA_K2
     # ------------------------------------------------------------------
     DATA_K2 = {
+        **_propagate_source_metadata(DATA_K1),
         't': t,
         'tension': tension,
         'compression': compression,
@@ -2568,6 +2592,7 @@ def create_PKL_H2(
     # Assemble DATA_J2
     # ------------------------------------------------------------------
     DATA_J2 = {
+        **_propagate_source_metadata(DATA_J1),
         't': t,
         'tension': tension,
         'compression': compression,

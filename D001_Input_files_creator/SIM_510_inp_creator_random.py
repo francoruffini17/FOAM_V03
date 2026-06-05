@@ -24,16 +24,14 @@ E = 20
 P = 0.08
 
 
-sim_num = 600
+sim_num = 510
+
 
 factor = 2e-5
 
-
-mesh_files = ['A030_005k.mesh.json','A030_010k.mesh.json','A030_020k.mesh.json', 'A030_040k.mesh.json', 'A030_080k.mesh.json', 'A030_160k.mesh.json']
-
-
+mesh_files = ['R030_005k.mesh.json','R030_010k.mesh.json','R030_020k.mesh.json', 'R030_040k.mesh.json', 'R030_080k.mesh.json', 'R030_160k.mesh.json']
 for mesh_file in mesh_files:
-    # mesh_file = f'A02{i}.mesh.json'
+    # mesh_file = f'R02{i}.mesh.json'
     os.makedirs('I001_Results/OBJ_files', exist_ok=True)
 
 
@@ -148,7 +146,7 @@ for mesh_file in mesh_files:
         # BC_z_p=[None, None, None, None, None, None],
         corner_xnyn_bc = [0, 0, None, None, None, None],
         corner_xpyn_bc = [None, 0, None, None, None, None],
-        BC_9999997 = [None, -5, None, None, None, None],  # prescribe DA (DOF 1) = 0.1
+        BC_9999997 = [None, -3.5, None, None, None, None],  # prescribe DA (DOF 1) = 0.1
 
 
         # --- pressure load ---

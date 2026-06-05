@@ -29,7 +29,7 @@ sim_num = 500
 
 factor = 2e-5
 
-mesh_files = ['R030_005k.mesh.json','R030_010k.mesh.json','R030_020k.mesh.json', 'R030_040k.mesh.json', 'R030_080k.mesh.json']
+mesh_files = ['R030_005k.mesh.json','R030_010k.mesh.json','R030_020k.mesh.json', 'R030_040k.mesh.json', 'R030_080k.mesh.json', 'R030_160k.mesh.json']
 for mesh_file in mesh_files:
     # mesh_file = f'R02{i}.mesh.json'
     os.makedirs('I001_Results/OBJ_files', exist_ok=True)

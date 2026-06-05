@@ -47,7 +47,7 @@ generator, mesh = create_random_mesh(
     allow_cut_bottom=False,
     allow_cut_top=False,
     element_type="BOTH",
-    mesh_size=0.0085,
+    mesh_size=0.00172,
     periodic="both",
 )
 
