@@ -62,6 +62,16 @@ def _mesh_prefix_for_sim(sim_num: int) -> str:
     return _mesh_prefix_from_input_name(sim_json["input_name"])
 
 
+def _load_pickle_or_skip(path: str, context: str):
+    """Load a pickle dependency, returning None when this item should be skipped."""
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception as e:
+        print(f"Skipping {context}; could not load '{path}': {e}")
+        return None
+
+
 def merge_data(data, dataa2):
     """
     Creates a new dictionary based on `data`, adding or updating 
@@ -2686,8 +2696,9 @@ def process_simulation(args):
 
 
         if in_A2 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_A.pkl', 'rb') as f:
-                data_varA = pickle.load(f)
+            data_varA = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_A.pkl', f"A2 for simulation {i:03d}")
+            if data_varA is None:
+                return
             data_varA2 = dataA2_generator(data_varA)
             pickle_file = f'I001_Results/DATA_PICK_{i:03}_A2.pkl'
 
@@ -2729,8 +2740,9 @@ def process_simulation(args):
 
 
         if in_C2 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_C.pkl', 'rb') as f:
-                data_varC = pickle.load(f)
+            data_varC = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C.pkl', f"C2 for simulation {i:03d}")
+            if data_varC is None:
+                return
             data_varC2 = dataC2_generator(data_varC, sim_num=i)
             pickle_file = f'I001_Results/DATA_PICK_{i:03}_C2.pkl'
             with open(pickle_file, 'wb') as f:
@@ -2740,10 +2752,10 @@ def process_simulation(args):
 
 
         if in_D in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_B.pkl', 'rb') as f:
-                data_varB = pickle.load(f)
-            with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
-                data_varC2 = pickle.load(f)
+            data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"D for simulation {i:03d}")
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"D for simulation {i:03d}")
+            if data_varB is None or data_varC2 is None:
+                return
 
             data_varD = dataD_generator(data_varB, data_varC2)
             pickle_file = f'I001_Results/DATA_PICK_{i:03}_D.pkl'
@@ -2754,8 +2766,9 @@ def process_simulation(args):
 
 
         if in_A2 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_A.pkl', 'rb') as f:
-                data_varA = pickle.load(f)
+            data_varA = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_A.pkl', f"A2 for simulation {i:03d}")
+            if data_varA is None:
+                return
             data_varA2 = dataA2_generator(data_varA)
             pickle_file = f'I001_Results/DATA_PICK_{i:03}_A2.pkl'
             with open(pickle_file, 'wb') as f:
@@ -2765,8 +2778,9 @@ def process_simulation(args):
 
 
         if in_T1 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
-                data_varC2 = pickle.load(f)
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"T1 for simulation {i:03d}")
+            if data_varC2 is None:
+                return
             mesh_prefix = _mesh_prefix_for_sim(i)
 
             for ext_T1s in range(T1_ini, T1_fin + 1):
@@ -2801,8 +2815,10 @@ def process_simulation(args):
             # T1 already exists on disk, load it and compute T2
             for ext_T1s in range(T1_ini, T1_fin + 1):
                 try:
-                    with open(f'I001_Results/DATA_PICK_{i:03}_T1_{ext_T1s:03d}.pkl', 'rb') as f:
-                        data_T1 = pickle.load(f)
+                    t1_path = f'I001_Results/DATA_PICK_{i:03}_T1_{ext_T1s:03d}.pkl'
+                    data_T1 = _load_pickle_or_skip(t1_path, f"T2 for simulation {i:03d}, T1={ext_T1s:03d}")
+                    if data_T1 is None:
+                        continue
                     data_T2 = create_PKL_T2(
                         data_T1,
                         sim_num=i,
@@ -2815,10 +2831,10 @@ def process_simulation(args):
 
 
         if in_J1 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_B.pkl', 'rb') as f:
-                data_varB = pickle.load(f)
-            with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
-                data_varC2 = pickle.load(f)
+            data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"J1 for simulation {i:03d}")
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"J1 for simulation {i:03d}")
+            if data_varB is None or data_varC2 is None:
+                return
 
             # Resolve graph file path from the simulation JSON
             mesh_prefix = _mesh_prefix_for_sim(i)
@@ -2859,8 +2875,10 @@ def process_simulation(args):
 
                 try:
 
-                    with open(f'I001_Results/DATA_PICK_{i:03}_J1_{ext_Js:03d}.pkl', 'rb') as f:
-                        data_J1 = pickle.load(f)
+                    j1_path = f'I001_Results/DATA_PICK_{i:03}_J1_{ext_Js:03d}.pkl'
+                    data_J1 = _load_pickle_or_skip(j1_path, f"J2 for simulation {i:03d}, J={ext_Js:03d}")
+                    if data_J1 is None:
+                        continue
                     data_J2 = create_PKL_J2(data_J1, sim_num=i)
                     pickle_file = f'I001_Results/DATA_PICK_{i:03}_J2_{ext_Js:03d}.pkl'
                     with open(pickle_file, 'wb') as f:
@@ -2875,8 +2893,10 @@ def process_simulation(args):
             for ext_Js in range(J_ini, J_fin + 1):
 
                 try:
-                    with open(f"I001_Results/DATA_PICK_{i:03}_J2_{ext_Js:03d}.pkl", "rb") as file:
-                        data_J2 = pickle.load(file)
+                    j2_path = f"I001_Results/DATA_PICK_{i:03}_J2_{ext_Js:03d}.pkl"
+                    data_J2 = _load_pickle_or_skip(j2_path, f"J3 for simulation {i:03d}, J={ext_Js:03d}")
+                    if data_J2 is None:
+                        continue
 
                     pkl_J3 = create_PKL_G2_exact(data_J2, n_workers=n_workers, max_memory_gb=max_memory_gb, algorithm=J_alg)
 
@@ -2895,10 +2915,10 @@ def process_simulation(args):
 
 
         if in_H1 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_B.pkl', 'rb') as f:
-                data_varB = pickle.load(f)
-            with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
-                data_varC2 = pickle.load(f)
+            data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"H1 for simulation {i:03d}")
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"H1 for simulation {i:03d}")
+            if data_varB is None or data_varC2 is None:
+                return
 
             # Resolve graph file path from the simulation JSON
             mesh_prefix = _mesh_prefix_for_sim(i)
@@ -2940,8 +2960,10 @@ def process_simulation(args):
 
                 try:
 
-                    with open(f'I001_Results/DATA_PICK_{i:03}_H1_{ext_Hs:03d}.pkl', 'rb') as f:
-                        data_H1 = pickle.load(f)
+                    h1_path = f'I001_Results/DATA_PICK_{i:03}_H1_{ext_Hs:03d}.pkl'
+                    data_H1 = _load_pickle_or_skip(h1_path, f"H2 for simulation {i:03d}, H={ext_Hs:03d}")
+                    if data_H1 is None:
+                        continue
                     data_H2 = create_PKL_H2(data_H1, sim_num=i)
                     pickle_file = f'I001_Results/DATA_PICK_{i:03}_H2_{ext_Hs:03d}.pkl'
                     with open(pickle_file, 'wb') as f:
@@ -2956,8 +2978,10 @@ def process_simulation(args):
             for ext_Hs in range(H_ini, H_fin + 1):
 
                 try:
-                    with open(f"I001_Results/DATA_PICK_{i:03}_H2_{ext_Hs:03d}.pkl", "rb") as file:
-                        data_H2 = pickle.load(file)
+                    h2_path = f"I001_Results/DATA_PICK_{i:03}_H2_{ext_Hs:03d}.pkl"
+                    data_H2 = _load_pickle_or_skip(h2_path, f"H3 for simulation {i:03d}, H={ext_Hs:03d}")
+                    if data_H2 is None:
+                        continue
 
                     pkl_H3 = create_PKL_G2_exact(data_H2, n_workers=n_workers, max_memory_gb=max_memory_gb, algorithm=H_alg)
 
@@ -2975,10 +2999,10 @@ def process_simulation(args):
 
 
         if in_I1 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_B.pkl', 'rb') as f:
-                data_varB = pickle.load(f)
-            with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
-                data_varC2 = pickle.load(f)
+            data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"I1 for simulation {i:03d}")
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"I1 for simulation {i:03d}")
+            if data_varB is None or data_varC2 is None:
+                return
 
             # Resolve graph file path from the simulation JSON
             mesh_prefix = _mesh_prefix_for_sim(i)
@@ -3020,8 +3044,10 @@ def process_simulation(args):
 
                 try:
 
-                    with open(f'I001_Results/DATA_PICK_{i:03}_I1_{ext_Is:03d}.pkl', 'rb') as f:
-                        data_I1 = pickle.load(f)
+                    i1_path = f'I001_Results/DATA_PICK_{i:03}_I1_{ext_Is:03d}.pkl'
+                    data_I1 = _load_pickle_or_skip(i1_path, f"I2 for simulation {i:03d}, I={ext_Is:03d}")
+                    if data_I1 is None:
+                        continue
                     data_I2 = create_PKL_H2(data_I1, sim_num=i)
                     pickle_file = f'I001_Results/DATA_PICK_{i:03}_I2_{ext_Is:03d}.pkl'
                     with open(pickle_file, 'wb') as f:
@@ -3036,8 +3062,10 @@ def process_simulation(args):
             for ext_Is in range(I_ini, I_fin + 1):
 
                 try:
-                    with open(f"I001_Results/DATA_PICK_{i:03}_I2_{ext_Is:03d}.pkl", "rb") as file:
-                        data_I2 = pickle.load(file)
+                    i2_path = f"I001_Results/DATA_PICK_{i:03}_I2_{ext_Is:03d}.pkl"
+                    data_I2 = _load_pickle_or_skip(i2_path, f"I3 for simulation {i:03d}, I={ext_Is:03d}")
+                    if data_I2 is None:
+                        continue
 
                     pkl_I3 = create_PKL_G2_exact(data_I2, n_workers=n_workers, max_memory_gb=max_memory_gb, algorithm=I_alg)
 
@@ -3055,10 +3083,10 @@ def process_simulation(args):
 
 
         if in_K1 in ('y', 'Y'):
-            with open(f'I001_Results/DATA_PICK_{i:03}_B.pkl', 'rb') as f:
-                data_varB = pickle.load(f)
-            with open(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', 'rb') as f:
-                data_varC2 = pickle.load(f)
+            data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"K1 for simulation {i:03d}")
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"K1 for simulation {i:03d}")
+            if data_varB is None or data_varC2 is None:
+                return
 
             # Resolve mesh prefix from the simulation JSON
             mesh_prefix = _mesh_prefix_for_sim(i)
@@ -3100,8 +3128,10 @@ def process_simulation(args):
 
                 try:
 
-                    with open(f'I001_Results/DATA_PICK_{i:03}_K1_{ext_Ks:03d}.pkl', 'rb') as f:
-                        data_K1 = pickle.load(f)
+                    k1_path = f'I001_Results/DATA_PICK_{i:03}_K1_{ext_Ks:03d}.pkl'
+                    data_K1 = _load_pickle_or_skip(k1_path, f"K2 for simulation {i:03d}, K={ext_Ks:03d}")
+                    if data_K1 is None:
+                        continue
                     data_K2 = create_PKL_K2(data_K1, sim_num=i)
                     pickle_file = f'I001_Results/DATA_PICK_{i:03}_K2_{ext_Ks:03d}.pkl'
                     with open(pickle_file, 'wb') as f:
@@ -3116,8 +3146,10 @@ def process_simulation(args):
             for ext_Ks in range(K_ini, K_fin + 1):
 
                 try:
-                    with open(f"I001_Results/DATA_PICK_{i:03}_K2_{ext_Ks:03d}.pkl", "rb") as file:
-                        data_K2 = pickle.load(file)
+                    k2_path = f"I001_Results/DATA_PICK_{i:03}_K2_{ext_Ks:03d}.pkl"
+                    data_K2 = _load_pickle_or_skip(k2_path, f"K3 for simulation {i:03d}, K={ext_Ks:03d}")
+                    if data_K2 is None:
+                        continue
 
                     pkl_K3 = create_PKL_G2_exact(data_K2, n_workers=n_workers, max_memory_gb=max_memory_gb, algorithm=K_alg)
 
