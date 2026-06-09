@@ -79,8 +79,8 @@ A26.ylim = (-2, 2)
 
 A60 = frame_variable()
 A60.x_key_path = "['t']"
-A60.y_key_paths = ["['ALLIE']['ASSEMBLY']", "['ALLSD']['ASSEMBLY']"]
-A60.legends = ['ALLIE', 'ALLSD']
+A60.y_key_paths = ["['ALLWK']['ASSEMBLY']", "['ALLSD']['ASSEMBLY']"]
+A60.legends = ['ALLWK', 'ALLSD']
 A60.normalized_by = 1
 A60.invert_y = False
 A60.xlabel = "Time [s]"
@@ -99,12 +99,12 @@ A60.file_key_y = 'A'
 A61 = frame_variable()
 A61.x_key_path = "['t']"
 A61.y_key_paths = []
-A61.ratio_key_pairs = [("['ALLSD']['ASSEMBLY']", "['ALLSE']['ASSEMBLY']")]
-A61.legends = ['ALLSD / ALLSE']
+A61.ratio_key_pairs = [("['ALLWK']['ASSEMBLY']", "['ALLSE']['ASSEMBLY']")]
+A61.legends = ['ALLWK / ALLSE']
 A61.normalized_by = 1
 A61.invert_y = False
 A61.xlabel = "Time [s]"
-A61.ylabel = "ALLSD / ALLSE"
+A61.ylabel = "ALLWK / ALLSE"
 A61.title = None
 A61.derivative = False
 A61.save_path = 'frames_A61/'
@@ -441,8 +441,151 @@ FI3003.file_ext = 'I3_BFS_3003'
 
 
 
+HT3004 = frame_animation_graph()
+HT3004.title = ''
+HT3004.num_frames = num_frames
+HT3004.dpi = 300
+HT3004.J1_ext = '3004'
+HT3004.key_letter = 'H'
+HT3004.plot_ten_comp = 't'
+HT3004.plot_ten_comp_color_bar = False
+
+
+HC3004 = frame_animation_graph()
+HC3004.title = ''
+HC3004.num_frames = num_frames
+HC3004.dpi = 300
+HC3004.J1_ext = '3004'
+HC3004.key_letter = 'H'
+HC3004.plot_ten_comp = 'c'
+HC3004.plot_ten_comp_color_bar = False
+
+
+FH3004 = graph_property()
+FH3004.ppty = 'G_eff'
+FH3004.legends = True
+FH3004.grid = True
+FH3004.Title = None
+FH3004.xlabel = 'Compression Ratio'
+FH3004.ylabel = 'Average \n global efficiency'
+FH3004.save_path = 'frames_10/'
+FH3004.legend_loc = 'upper right'
+FH3004.dpi = 100
+FH3004.figsize = (4.75,4)
+FH3004.num_frames = num_frames
+FH3004.file_ext = 'H3_BFS_3004'
+
+
+IT3004 = frame_animation_graph()
+IT3004.title = ''
+IT3004.num_frames = num_frames
+IT3004.dpi = 300
+IT3004.J1_ext = '3004'
+IT3004.key_letter = 'I'
+IT3004.plot_ten_comp = 't'
+IT3004.plot_ten_comp_color_bar = False
+
+
+IC3004 = frame_animation_graph()
+IC3004.title = ''
+IC3004.num_frames = num_frames
+IC3004.dpi = 300
+IC3004.J1_ext = '3004'
+IC3004.key_letter = 'I'
+IC3004.plot_ten_comp = 'c'
+IC3004.plot_ten_comp_color_bar = False
+
+
+FI3004 = graph_property()
+FI3004.ppty = 'G_eff'
+FI3004.legends = True
+FI3004.grid = True
+FI3004.Title = None
+FI3004.xlabel = 'Compression Ratio'
+FI3004.ylabel = 'Average \n global efficiency'
+FI3004.save_path = 'frames_10/'
+FI3004.legend_loc = 'upper right'
+FI3004.dpi = 100
+FI3004.figsize = (4.75,4)
+FI3004.num_frames = num_frames
+FI3004.file_ext = 'I3_BFS_3004'
+
+
+
+
+
+HT3005 = frame_animation_graph()
+HT3005.title = ''
+HT3005.num_frames = num_frames
+HT3005.dpi = 300
+HT3005.J1_ext = '3005'
+HT3005.key_letter = 'H'
+HT3005.plot_ten_comp = 't'
+HT3005.plot_ten_comp_color_bar = False
+
+
+HC3005 = frame_animation_graph()
+HC3005.title = ''
+HC3005.num_frames = num_frames
+HC3005.dpi = 300
+HC3005.J1_ext = '3005'
+HC3005.key_letter = 'H'
+HC3005.plot_ten_comp = 'c'
+HC3005.plot_ten_comp_color_bar = False
+
+
+FH3005 = graph_property()
+FH3005.ppty = 'G_eff'
+FH3005.legends = True
+FH3005.grid = True
+FH3005.Title = None
+FH3005.xlabel = 'Compression Ratio'
+FH3005.ylabel = 'Average \n global efficiency'
+FH3005.save_path = 'frames_10/'
+FH3005.legend_loc = 'upper right'
+FH3005.dpi = 100
+FH3005.figsize = (4.75,4)
+FH3005.num_frames = num_frames
+FH3005.file_ext = 'H3_BFS_3005'
+
+
+IT3005 = frame_animation_graph()
+IT3005.title = ''
+IT3005.num_frames = num_frames
+IT3005.dpi = 300
+IT3005.J1_ext = '3005'
+IT3005.key_letter = 'I'
+IT3005.plot_ten_comp = 't'
+IT3005.plot_ten_comp_color_bar = False
+
+
+IC3005 = frame_animation_graph()
+IC3005.title = ''
+IC3005.num_frames = num_frames
+IC3005.dpi = 300
+IC3005.J1_ext = '3005'
+IC3005.key_letter = 'I'
+IC3005.plot_ten_comp = 'c'
+IC3005.plot_ten_comp_color_bar = False
+
+
+FI3005 = graph_property()
+FI3005.ppty = 'G_eff'
+FI3005.legends = True
+FI3005.grid = True
+FI3005.Title = None
+FI3005.xlabel = 'Compression Ratio'
+FI3005.ylabel = 'Average \n global efficiency'
+FI3005.save_path = 'frames_10/'
+FI3005.legend_loc = 'upper right'
+FI3005.dpi = 100
+FI3005.figsize = (4.75,4)
+FI3005.num_frames = num_frames
+FI3005.file_ext = 'I3_BFS_3005'
+
+
 T = frames_combination()
-T.canvas_size = (7700, 2450)
+T.canvas_size = (3500, 3000)
 # T.title = "Deformation {DATA['U2']['Y-POSITIVE'][ti]:0.2f} mm | E = {DATA_J['E']} MPa | Ei = {DATA_J['steps'][0]['Pressure_BC']} MPa"
 T.title = "Deformation {-DATA['U2']['PERN-9999997'][ti]:0.2f} mm | E = {DATA_J['E']} MPa | Pi = {DATA_J['steps'][0]['Pressure_BC']} MPa | Porosity = {porosity}"
 # T.title = " SIN TITULO"
@@ -541,7 +684,7 @@ T.elements = [
         "size": (230, 230),
         "path": "frames_HT3001/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": HT3001,
         "replace_frames": False,
@@ -553,7 +696,7 @@ T.elements = [
         "size": (230, 230),
         "path": "frames_HC3001/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": HC3001,
         "replace_frames": False,
@@ -578,7 +721,7 @@ T.elements = [
         "size": (230, 230),
         "path": "frames_IT3001/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": IT3001,
         "replace_frames": False,
@@ -590,7 +733,7 @@ T.elements = [
         "size": (230, 230),
         "path": "frames_IC3001/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": IC3001,
         "replace_frames": False,
@@ -611,7 +754,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 100),
+        "position": (1200, 100),
         # "size": (500, 400),
         "size": (500, 500), 
         "path": "frames_VT002/",
@@ -624,7 +767,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 650),
+        "position": (1200, 650),
         # "size": (500, 400),
         "size": (500, 500), 
         "path": "frames_T002/",
@@ -637,11 +780,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 1180),
+        "position": (1200, 1180),
         "size": (230, 230),
         "path": "frames_HT3002/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": HT3002,
         "replace_frames": False,
@@ -649,11 +792,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (870, 1180),
+        "position": (1470, 1180),
         "size": (230, 230),
         "path": "frames_HC3002/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": HC3002,
         "replace_frames": False,
@@ -661,7 +804,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 1450),
+        "position": (1200, 1450),
         "size": (500, 500),
         "path": "frames_FH3002/",
         "subtitle": "",
@@ -674,11 +817,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 1980),
+        "position": (1200, 1980),
         "size": (230, 230),
         "path": "frames_IT3002/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": IT3002,
         "replace_frames": False,
@@ -686,11 +829,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (870, 1980),
+        "position": (1470, 1980),
         "size": (230, 230),
         "path": "frames_IC3002/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": IC3002,
         "replace_frames": False,
@@ -698,7 +841,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 2250),
+        "position": (1200, 2250),
         "size": (500, 500),
         "path": "frames_FI3002/",
         "subtitle": "",
@@ -711,7 +854,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 100),
+        "position": (1800, 100),
         # "size": (500, 400),
         "size": (500, 500), 
         "path": "frames_VT003/",
@@ -724,7 +867,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 650),
+        "position": (1800, 650),
         # "size": (500, 400),
         "size": (500, 500), 
         "path": "frames_T003/",
@@ -737,11 +880,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 1180),
+        "position": (1800, 1180),
         "size": (230, 230),
         "path": "frames_HT3003/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": HT3003,
         "replace_frames": False,
@@ -749,11 +892,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (870, 1180),
+        "position": (2070, 1180),
         "size": (230, 230),
         "path": "frames_HC3003/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": HC3003,
         "replace_frames": False,
@@ -761,7 +904,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 1450),
+        "position": (1800, 1450),
         "size": (500, 500),
         "path": "frames_FH3003/",
         "subtitle": "",
@@ -774,11 +917,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 1980),
+        "position": (1800, 1980),
         "size": (230, 230),
         "path": "frames_IT3003/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": IT3003,
         "replace_frames": False,
@@ -786,11 +929,11 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (870, 1980),
+        "position": (2070, 1980),
         "size": (230, 230),
         "path": "frames_IC3003/",
         "subtitle": "",
-        "create_frames": False,
+        "create_frames": True,
         "type": 'GA',
         "object": IC3003,
         "replace_frames": False,
@@ -798,7 +941,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 2250),
+        "position": (1800, 2250),
         "size": (500, 500),
         "path": "frames_FI3003/",
         "subtitle": "",
@@ -810,6 +953,155 @@ T.elements = [
         # "subtitle_size": 1,
         # "subtitle_offset": 20,
     },
+        {
+        "position": (2400, 1180),
+        "size": (230, 230),
+        "path": "frames_HT3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": HT3004,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (2670, 1180),
+        "size": (230, 230),
+        "path": "frames_HC3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": HC3004,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (2400, 1450),
+        "size": (500, 500),
+        "path": "frames_FH3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FH3004,
+        "replace_frames": False,
+        # "subtitle": 'S11 + S22',
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (2400, 1980),
+        "size": (230, 230),
+        "path": "frames_IT3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": IT3004,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (2670, 1980),
+        "size": (230, 230),
+        "path": "frames_IC3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": IC3004,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (2400, 2250),
+        "size": (500, 500),
+        "path": "frames_FI3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FI3004,
+        "replace_frames": False,
+        # "subtitle": 'S11 + S22',
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3000, 1180),
+        "size": (230, 230),
+        "path": "frames_HT3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": HT3005,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3270, 1180),
+        "size": (230, 230),
+        "path": "frames_HC3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": HC3005,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3000, 1450),
+        "size": (500, 500),
+        "path": "frames_FH3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FH3005,
+        "replace_frames": False,
+        # "subtitle": 'S11 + S22',
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3000, 1980),
+        "size": (230, 230),
+        "path": "frames_IT3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": IT3005,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3270, 1980),
+        "size": (230, 230),
+        "path": "frames_IC3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GA',
+        "object": IC3005,
+        "replace_frames": False,
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3000, 2250),
+        "size": (500, 500),
+        "path": "frames_FI3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FI3005,
+        "replace_frames": False,
+        # "subtitle": 'S11 + S22',
+        # "subtitle_size": 1,
+        # "subtitle_offset": 20,
+    },
+
 ]
 
 
