@@ -4500,6 +4500,51 @@ class MeshConfigRand:
     edge_right: float = 0.0
     edge_bottom: float = 0.0
     edge_top: float = 0.0
+    hole_size_distribution: str = 'normal'
+    """Sampling distribution for hole diameters.
+    Accepted values:
+      ``'normal'``      – truncated normal centred at mid-range (default).
+      ``'uniform'``     – flat probability across [min, max].
+      ``'right_skew'``  – skewed toward small holes (Beta(2, 2*skew_strength)).
+      ``'left_skew'``   – skewed toward large holes (Beta(2*skew_strength, 2)).
+    """
+    hole_size_skew_strength: float = 2.5
+    """Controls the degree of skewness when ``hole_size_distribution`` is
+    ``'right_skew'`` or ``'left_skew'``.
+
+    The Beta distribution parameters are derived as:
+      - ``right_skew``: Beta(2, 2 * skew_strength)  – higher → more small holes.
+      - ``left_skew``:  Beta(2 * skew_strength, 2)  – higher → more large holes.
+
+    Default ``2.5`` gives Beta(2, 5) / Beta(5, 2) (mild-to-moderate skew).
+    Values around ``1.0`` approach uniform; values above ``5`` give strong skew.
+    Has no effect for ``'normal'`` or ``'uniform'`` distributions.
+    """
+    placement_algorithm: str = 'rsa'
+    """Hole-placement algorithm.
+
+    ``'rsa'`` – Random Sequential Addition (default).  Fast, works well
+    up to ~55 % porosity.
+
+    ``'ls'``  – Lubachevsky–Stillinger.  Grows all holes simultaneously
+    from r ≈ 0 while resolving overlaps via iterative push-apart (soft
+    MD).  Can reach 75 %+ porosity but is slower.
+
+    ``'vgp'`` – Void-Guided Placement.  At each step the grid point
+    with the largest clearance from existing hole edges and walls is
+    chosen as the next hole centre.  Produces spatially uniform
+    distributions and reaches high porosities without the
+    computational cost of LS.  No extra parameters required.
+    """
+    ls_max_steps: int = 3000
+    """Maximum number of growth + resolution iterations for the LS
+    algorithm.  Increase for high porosity or large hole counts."""
+    ls_resolve_iters: int = 80
+    """Number of overlap-resolution passes per growth step in LS."""
+    ls_growth_rate: float = 0.02
+    """Fraction of the remaining radius gap added per LS step.
+    Smaller values (e.g. 0.005) are more stable at very high porosities
+    but require more steps."""
 
 
 # ---------------------------------------------------------------------------
@@ -4782,6 +4827,12 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         edge_right: float = 0.0,
         edge_bottom: float = 0.0,
         edge_top: float = 0.0,
+        hole_size_distribution: str = 'normal',
+        hole_size_skew_strength: float = 2.5,
+        placement_algorithm: str = 'rsa',
+        ls_max_steps: int = 3000,
+        ls_resolve_iters: int = 80,
+        ls_growth_rate: float = 0.02,
     ):
         # Store parameters (do NOT call super().__init__ because that
         # computes hexagonal geometry).
@@ -4800,6 +4851,12 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         self.edge_right  = float(edge_right)
         self.edge_bottom = float(edge_bottom)
         self.edge_top    = float(edge_top)
+        self.hole_size_distribution = hole_size_distribution
+        self.hole_size_skew_strength = float(hole_size_skew_strength)
+        self.placement_algorithm = placement_algorithm
+        self.ls_max_steps    = int(ls_max_steps)
+        self.ls_resolve_iters = int(ls_resolve_iters)
+        self.ls_growth_rate  = float(ls_growth_rate)
 
         # Place holes
         self.hole_centers, self.hole_radii = self._place_random_holes(
@@ -4854,8 +4911,16 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
         extends past a periodic boundary is automatically mirrored to
         the opposite side.
         """
-        from scipy.stats import truncnorm
+        # Dispatch to the configured placement algorithm
+        algo = getattr(self, 'placement_algorithm', 'rsa').strip().lower()
+        if algo == 'ls':
+            return self._place_holes_ls(periodic_lr=periodic_lr,
+                                        periodic_tb=periodic_tb)
+        if algo == 'vgp':
+            return self._place_holes_vgp(periodic_lr=periodic_lr,
+                                         periodic_tb=periodic_tb)
 
+        # --- RSA (Random Sequential Addition) ---
         rng = np.random.default_rng(self.seed)
         L = self.domain_size
         # Porosity is relative to the inner (active) domain, i.e. excluding
@@ -4878,24 +4943,13 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
                    self.allow_cut_bottom or self.allow_cut_top)
         margin = max_r if any_cut else 0.0
 
-        # --- pre-sample radii from a truncated normal ----------------------
+        # --- pre-sample radii from the requested distribution --------------
         mean_r = (min_r + max_r) / 2.0
-        std_r  = (max_r - min_r) / 4.0  # ±2σ covers the range
-        if std_r < 1e-15:
-            std_r = 1e-15
-
-        a_clip = (min_r - mean_r) / std_r
-        b_clip = (max_r - mean_r) / std_r
-
         # Estimate upper bound on the number of holes needed (overshoot ×1.5)
         mean_area = np.pi * mean_r ** 2
         n_estimate = int(np.ceil(target_area / mean_area * 1.5)) + 50
-        all_radii = truncnorm.rvs(
-            a_clip, b_clip, loc=mean_r, scale=std_r,
-            size=n_estimate, random_state=rng,
-        )
         # Sort descending so large holes are placed first
-        all_radii = np.sort(all_radii)[::-1]
+        all_radii = np.sort(self._sample_radii(n_estimate, rng))[::-1]
 
         # --- KD-tree bookkeeping -------------------------------------------
         tree: Optional[cKDTree] = None
@@ -5019,6 +5073,500 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
 
         if not centers:
             warnings.warn("No holes were placed")
+            return np.array([]).reshape(0, 2), np.array([])
+
+        return np.array(centers), np.array(radii)
+
+    # ---- shared radius sampler -------------------------------------------
+
+    def _sample_radii(self, N: int, rng: 'np.random.Generator') -> np.ndarray:
+        """Sample *N* target hole radii from the configured distribution."""
+        from scipy.stats import truncnorm, beta as beta_dist
+
+        min_r = self.min_hole_radius
+        max_r = self.max_hole_radius
+        mean_r = (min_r + max_r) / 2.0
+        distribution = getattr(self, 'hole_size_distribution', 'normal')
+        skew_s = max(float(getattr(self, 'hole_size_skew_strength', 2.5)), 1e-3)
+
+        _dist = distribution.strip().lower()
+        if _dist == 'uniform':
+            return rng.uniform(min_r, max_r, size=N).astype(float)
+        elif _dist == 'right_skew':
+            return np.asarray(beta_dist.rvs(
+                2, 2 * skew_s, loc=min_r, scale=(max_r - min_r),
+                size=N, random_state=rng), dtype=float)
+        elif _dist == 'left_skew':
+            return np.asarray(beta_dist.rvs(
+                2 * skew_s, 2, loc=min_r, scale=(max_r - min_r),
+                size=N, random_state=rng), dtype=float)
+        else:  # 'normal'
+            std_r = max((max_r - min_r) / 4.0, 1e-15)
+            a_clip = (min_r - mean_r) / std_r
+            b_clip = (max_r - mean_r) / std_r
+            return np.asarray(truncnorm.rvs(
+                a_clip, b_clip, loc=mean_r, scale=std_r,
+                size=N, random_state=rng), dtype=float)
+
+    # ---- Lubachevsky–Stillinger algorithm --------------------------------
+
+    def _place_holes_ls(
+        self,
+        periodic_lr: bool = False,
+        periodic_tb: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Lubachevsky–Stillinger (LS) packing algorithm.
+
+        N seeds are placed randomly at r ≈ 0 and all grown simultaneously
+        toward pre-assigned target radii.  After each growth micro-step,
+        overlapping pairs are pushed apart via a vectorised Jacobi
+        push-apart (soft-sphere MD) until no overlaps remain.  Periodic
+        boundaries are handled with the minimum-image convention; hard
+        walls contribute explicit repulsion forces so that clipping does
+        not create irresolvable overlaps at walls.
+
+        After the main loop, a greedy post-processing pass removes any
+        residual overlaps (keeps the larger of each conflicting pair) and
+        enforces wall constraints strictly.
+
+        Tunable via :class:`MeshConfigRand` fields
+        ``ls_max_steps``, ``ls_resolve_iters``, ``ls_growth_rate``.
+        """
+        rng = np.random.default_rng(self.seed)
+        L = self.domain_size
+        inner_w = max(L - self.edge_left - self.edge_right, L * 0.01)
+        inner_h = max(L - self.edge_bottom - self.edge_top, L * 0.01)
+        target_area = self.porosity * inner_w * inner_h
+
+        min_r = self.min_hole_radius
+        max_r = self.max_hole_radius
+        min_dist = self.min_distance
+
+        max_steps   = self.ls_max_steps
+        n_resolve   = self.ls_resolve_iters
+        growth_rate = self.ls_growth_rate
+
+        # --- sample target radii for all N holes ---------------------------
+        mean_r = (min_r + max_r) / 2.0
+        N = max(int(np.ceil(target_area / (np.pi * mean_r ** 2))), 1)
+        target_radii = self._sample_radii(N, rng)
+
+        # --- seed positions uniformly in [0, L] × [0, L] ------------------
+        pos   = np.column_stack([
+            rng.uniform(0.0, L, N),
+            rng.uniform(0.0, L, N),
+        ]).astype(float)
+        radii = np.full(N, max(min_r * 1e-4, 1e-12))
+
+        # ------------------------------------------------------------------
+        # Helpers
+        # ------------------------------------------------------------------
+
+        def _apply_boundaries(pos_: np.ndarray, radii_: np.ndarray) -> None:
+            """Hard clamp: safety net after wall-repulsion forces."""
+            if not periodic_lr:
+                lo_x = np.zeros(N)   if self.allow_cut_left   else radii_
+                hi_x = np.full(N, L) if self.allow_cut_right  else L - radii_
+                pos_[:, 0] = np.clip(pos_[:, 0], lo_x, hi_x)
+            else:
+                pos_[:, 0] = pos_[:, 0] % L
+            if not periodic_tb:
+                lo_y = np.zeros(N)   if self.allow_cut_bottom else radii_
+                hi_y = np.full(N, L) if self.allow_cut_top    else L - radii_
+                pos_[:, 1] = np.clip(pos_[:, 1], lo_y, hi_y)
+            else:
+                pos_[:, 1] = pos_[:, 1] % L
+
+        def _wall_forces(pos_: np.ndarray, radii_: np.ndarray
+                         ) -> Tuple[np.ndarray, np.ndarray]:
+            """Return explicit wall-repulsion deltas for non-cut, non-periodic walls.
+
+            A wall at position w pushes holes whose edge penetrates it
+            by exactly the penetration depth, so one application fully
+            resolves the wall violation without over-shooting.
+            """
+            dx = np.zeros(N)
+            dy = np.zeros(N)
+            half_gap = min_dist * 0.5
+            if not periodic_lr:
+                if not self.allow_cut_left:
+                    pen = (radii_ + half_gap) - pos_[:, 0]
+                    mask = pen > 0
+                    dx[mask] += pen[mask]
+                if not self.allow_cut_right:
+                    pen = (pos_[:, 0] + radii_ + half_gap) - L
+                    mask = pen > 0
+                    dx[mask] -= pen[mask]
+            if not periodic_tb:
+                if not self.allow_cut_bottom:
+                    pen = (radii_ + half_gap) - pos_[:, 1]
+                    mask = pen > 0
+                    dy[mask] += pen[mask]
+                if not self.allow_cut_top:
+                    pen = (pos_[:, 1] + radii_ + half_gap) - L
+                    mask = pen > 0
+                    dy[mask] -= pen[mask]
+            return dx, dy
+
+        def _has_overlaps(pos_: np.ndarray, radii_: np.ndarray) -> bool:
+            """True if any pair of holes overlaps (including min_dist gap)."""
+            if len(pos_) < 2:
+                return False
+            tree_ = cKDTree(pos_)
+            cand = tree_.query_pairs(
+                r=2.0 * float(np.max(radii_)) + min_dist + 1e-10,
+                output_type='ndarray',
+            )
+            if len(cand) == 0:
+                return False
+            ii_, jj_ = cand[:, 0], cand[:, 1]
+            ddx = pos_[jj_, 0] - pos_[ii_, 0]
+            ddy = pos_[jj_, 1] - pos_[ii_, 1]
+            if periodic_lr: ddx -= L * np.round(ddx / L)
+            if periodic_tb: ddy -= L * np.round(ddy / L)
+            return bool(np.any(
+                ddx ** 2 + ddy ** 2
+                < (radii_[ii_] + radii_[jj_] + min_dist) ** 2
+            ))
+
+        # --- main growth + resolve loop ------------------------------------
+        for _step in range(max_steps):
+            # 1. Grow radii toward targets
+            radii = np.minimum(
+                radii + growth_rate * (target_radii - radii) + 1e-15,
+                target_radii,
+            )
+
+            # 2. Iterative overlap + wall resolution
+            for _ri in range(n_resolve):
+                delta_x = np.zeros(N)
+                delta_y = np.zeros(N)
+
+                # --- hole-hole overlap forces ------------------------------
+                tree = cKDTree(pos)
+                search_r = 2.0 * float(np.max(radii)) + min_dist + 1e-10
+                pairs = tree.query_pairs(r=search_r, output_type='ndarray')
+
+                any_overlap = False
+                if len(pairs) > 0:
+                    ii = pairs[:, 0]
+                    jj = pairs[:, 1]
+                    dx = pos[jj, 0] - pos[ii, 0]
+                    dy = pos[jj, 1] - pos[ii, 1]
+                    if periodic_lr: dx -= L * np.round(dx / L)
+                    if periodic_tb: dy -= L * np.round(dy / L)
+                    dist2   = dx * dx + dy * dy
+                    min_sep = radii[ii] + radii[jj] + min_dist
+                    ov_mask = dist2 < min_sep ** 2
+                    if np.any(ov_mask):
+                        any_overlap = True
+                        ii_ov     = ii[ov_mask]
+                        jj_ov     = jj[ov_mask]
+                        dx_ov     = dx[ov_mask].copy()
+                        dy_ov     = dy[ov_mask].copy()
+                        dist_ov   = np.sqrt(dist2[ov_mask])
+                        minsep_ov = min_sep[ov_mask]
+                        # Coincident centers: random nudge
+                        degen = dist_ov < 1e-15
+                        if np.any(degen):
+                            ang = rng.uniform(0.0, 2.0 * np.pi, int(np.sum(degen)))
+                            dx_ov[degen] = np.cos(ang) * 1e-8
+                            dy_ov[degen] = np.sin(ang) * 1e-8
+                            dist_ov[degen] = 1e-8
+                        push = 0.5 * (minsep_ov - dist_ov) / dist_ov
+                        np.add.at(delta_x, ii_ov, -push * dx_ov)
+                        np.add.at(delta_y, ii_ov, -push * dy_ov)
+                        np.add.at(delta_x, jj_ov,  push * dx_ov)
+                        np.add.at(delta_y, jj_ov,  push * dy_ov)
+
+                # --- wall repulsion forces ---------------------------------
+                wdx, wdy = _wall_forces(pos, radii)
+                any_wall = bool(np.any(wdx != 0.0) or np.any(wdy != 0.0))
+                delta_x += wdx
+                delta_y += wdy
+
+                pos[:, 0] += delta_x
+                pos[:, 1] += delta_y
+                _apply_boundaries(pos, radii)  # hard-clamp safety net
+
+                if not any_overlap and not any_wall:
+                    break  # inner loop converged
+
+            # 3. Outer convergence: all radii at target, no actual overlaps
+            if np.all(radii >= target_radii * 0.999) and not _has_overlaps(pos, radii):
+                break
+
+        # ------------------------------------------------------------------
+        # Post-processing — remove residual overlaps and wall violations
+        # ------------------------------------------------------------------
+
+        # 1. Remove holes that violate non-cut walls (shouldn't happen after
+        #    wall forces + clamp, but guard against edge cases)
+        tol = 1e-9
+        wall_ok = np.ones(len(pos), dtype=bool)
+        if not periodic_lr:
+            if not self.allow_cut_left:  wall_ok &= pos[:, 0] - radii >= -tol
+            if not self.allow_cut_right: wall_ok &= pos[:, 0] + radii <= L + tol
+        if not periodic_tb:
+            if not self.allow_cut_bottom: wall_ok &= pos[:, 1] - radii >= -tol
+            if not self.allow_cut_top:    wall_ok &= pos[:, 1] + radii <= L + tol
+        # For cut-allowed walls, still require center inside domain
+        if self.allow_cut_left:  wall_ok &= pos[:, 0] >= -max_r
+        if self.allow_cut_right: wall_ok &= pos[:, 0] <= L + max_r
+        if self.allow_cut_bottom: wall_ok &= pos[:, 1] >= -max_r
+        if self.allow_cut_top:    wall_ok &= pos[:, 1] <= L + max_r
+        # Must at least partially overlap the domain
+        wall_ok &= (pos[:, 0] + radii > tol) & (pos[:, 0] - radii < L - tol)
+        wall_ok &= (pos[:, 1] + radii > tol) & (pos[:, 1] - radii < L - tol)
+        pos   = pos[wall_ok]
+        radii = radii[wall_ok]
+
+        # 2. Greedy overlap removal: process largest→smallest; remove the
+        #    smaller of any still-conflicting pair.
+        if len(pos) > 1:
+            order = np.argsort(-radii)   # descending radius
+            keep  = np.ones(len(pos), dtype=bool)
+            pp_tree = cKDTree(pos)
+            for idx in order:
+                if not keep[idx]:
+                    continue
+                cx, cy, r = pos[idx, 0], pos[idx, 1], radii[idx]
+                nbrs = pp_tree.query_ball_point(
+                    [cx, cy], r + float(np.max(radii)) + min_dist + 1e-9)
+                for jdx in nbrs:
+                    if jdx == idx or not keep[jdx]:
+                        continue
+                    ex, ey, er = pos[jdx, 0], pos[jdx, 1], radii[jdx]
+                    ddx = cx - ex
+                    ddy = cy - ey
+                    if periodic_lr: ddx -= L * np.round(ddx / L)
+                    if periodic_tb: ddy -= L * np.round(ddy / L)
+                    if ddx ** 2 + ddy ** 2 < (r + er + min_dist) ** 2:
+                        keep[jdx] = False  # remove smaller (jdx ≤ idx in size)
+            pos   = pos[keep]
+            radii = radii[keep]
+
+        if len(pos) == 0:
+            warnings.warn("LS placement: no holes were placed.")
+            return np.array([]).reshape(0, 2), np.array([])
+
+        # --- add periodic mirrors (same convention as RSA) -----------------
+        all_centers: List[List[float]] = pos.tolist()
+        all_radii:   List[float]       = radii.tolist()
+        for k in range(len(pos)):
+            cx, cy, r = float(pos[k, 0]), float(pos[k, 1]), float(radii[k])
+            mirrors: List[Tuple[float, float]] = []
+            if periodic_lr:
+                if cx - r < 0: mirrors.append((cx + L, cy))
+                if cx + r > L: mirrors.append((cx - L, cy))
+            if periodic_tb:
+                if cy - r < 0: mirrors.append((cx, cy + L))
+                if cy + r > L: mirrors.append((cx, cy - L))
+            if periodic_lr and periodic_tb:
+                if cx - r < 0 and cy - r < 0: mirrors.append((cx + L, cy + L))
+                if cx - r < 0 and cy + r > L: mirrors.append((cx + L, cy - L))
+                if cx + r > L and cy - r < 0: mirrors.append((cx - L, cy + L))
+                if cx + r > L and cy + r > L: mirrors.append((cx - L, cy - L))
+            for mx, my in mirrors:
+                if mx + r > 0 and mx - r < L and my + r > 0 and my - r < L:
+                    all_centers.append([mx, my])
+                    all_radii.append(r)
+
+        final_pos   = np.array(all_centers)
+        final_radii = np.array(all_radii)
+        achieved    = float(np.sum(np.pi * final_radii ** 2)) / (L * L)
+        if achieved < self.porosity * 0.90:
+            warnings.warn(
+                f"LS placement achieved approx. porosity {achieved:.4f} "
+                f"(target {self.porosity:.4f}). Consider increasing "
+                f"'ls_max_steps' or 'ls_resolve_iters', or reducing "
+                f"'min_distance'."
+            )
+        return final_pos, final_radii
+
+    # ---- Void-Guided Placement algorithm ---------------------------------
+
+    def _place_holes_vgp(
+        self,
+        periodic_lr: bool = False,
+        periodic_tb: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Void-Guided Placement (VGP) algorithm.
+
+        A uniform grid of candidate positions is maintained over the domain.
+        At each step the grid point with the largest *effective clearance*
+        – distance to the nearest existing hole edge, clamped by any active
+        wall constraints – is selected as the centre for the next hole.
+        This deterministically fills the largest voids first, yielding more
+        spatially uniform distributions and higher packing efficiency than
+        pure RSA.
+
+        Randomness enters only through hole-size sampling (same
+        ``_sample_radii`` helper as RSA/LS) and a small sub-cell jitter
+        applied after the best grid point is selected.
+
+        Accepts the same parameters as RSA/LS: ``domain_size``,
+        ``porosity``, ``min/max_hole_size``, ``min_distance_between_holes``,
+        ``edge_left/right/bottom/top``, ``hole_size_distribution``, and
+        ``hole_size_skew_strength``.  No additional fields are needed.
+        """
+        rng = np.random.default_rng(self.seed)
+        L = self.domain_size
+        inner_w = max(L - self.edge_left - self.edge_right, L * 0.01)
+        inner_h = max(L - self.edge_bottom - self.edge_top, L * 0.01)
+        target_area = self.porosity * inner_w * inner_h
+
+        min_r = self.min_hole_radius
+        max_r = self.max_hole_radius
+        min_dist = self.min_distance
+
+        # Grid resolution: ~4 cells per minimum radius so valid placement
+        # pockets are not missed.
+        cell_size = max(min_r * 0.5, L / 800.0)
+        grid_n = max(int(np.ceil(L / cell_size)), 40)
+        cell_size = L / grid_n  # normalise
+        half = cell_size * 0.5
+        xs = np.arange(grid_n) * cell_size + half
+        ys = np.arange(grid_n) * cell_size + half
+        gx, gy = np.meshgrid(xs, ys)
+        cand = np.column_stack([gx.ravel(), gy.ravel()])  # (M, 2)
+
+        # Static wall-clearance field (does not change as holes are added).
+        # For non-cut walls the clearance is the distance to that wall;
+        # for cut-allowed walls the clearance is infinite (no constraint).
+        wall_clr = np.full(len(cand), np.inf)
+        if not periodic_lr:
+            if not self.allow_cut_left:
+                wall_clr = np.minimum(wall_clr, cand[:, 0])
+            if not self.allow_cut_right:
+                wall_clr = np.minimum(wall_clr, L - cand[:, 0])
+        if not periodic_tb:
+            if not self.allow_cut_bottom:
+                wall_clr = np.minimum(wall_clr, cand[:, 1])
+            if not self.allow_cut_top:
+                wall_clr = np.minimum(wall_clr, L - cand[:, 1])
+
+        # Mask: only place hole centres inside the porous zone
+        # (excluding solid edge strips).
+        in_zone = (
+            (cand[:, 0] >= self.edge_left) &
+            (cand[:, 0] <= L - self.edge_right) &
+            (cand[:, 1] >= self.edge_bottom) &
+            (cand[:, 1] <= L - self.edge_top)
+        )
+
+        # Pre-sample radii sorted largest-first.
+        mean_r = (min_r + max_r) / 2.0
+        n_est  = int(np.ceil(target_area / (np.pi * mean_r ** 2) * 1.5)) + 50
+        all_radii = np.sort(self._sample_radii(n_est, rng))[::-1]
+
+        centers: List[List[float]] = []
+        radii:   List[float]       = []
+        current_area = 0.0
+
+        # Dynamic hole-clearance field: distance from each grid point to
+        # the nearest existing hole *edge* (centre-dist minus that radius).
+        # Maintained incrementally – O(M) update per placed hole.
+        hole_clr = np.full(len(cand), np.inf)
+
+        jitter_scale = min(half * 0.9, max_r * 0.10)
+
+        ri = 0
+        while current_area < target_area and ri < len(all_radii):
+            r = float(all_radii[ri])
+            ri += 1
+
+            remaining = target_area - current_area
+            if np.pi * r ** 2 > remaining * 3.0:
+                continue
+
+            # Effective clearance = min(hole clearance, wall clearance) - gap
+            eff = np.minimum(hole_clr, wall_clr) - min_dist
+
+            # Valid placements: inside porous zone and enough room for r
+            valid_mask = in_zone & (eff >= r)
+            if not np.any(valid_mask):
+                continue
+
+            # Select the grid point with the maximum effective clearance
+            valid_idxs = np.where(valid_mask)[0]
+            best_idx   = valid_idxs[np.argmax(eff[valid_idxs])]
+            bx, by     = float(cand[best_idx, 0]), float(cand[best_idx, 1])
+
+            # Sub-cell jitter for variety
+            cx = bx + rng.uniform(-jitter_scale, jitter_scale)
+            cy = by + rng.uniform(-jitter_scale, jitter_scale)
+
+            # Clamp jittered centre back into porous zone
+            cx = float(np.clip(cx, self.edge_left, L - self.edge_right))
+            cy = float(np.clip(cy, self.edge_bottom, L - self.edge_top))
+
+            # Wall re-check after jitter
+            if not periodic_lr:
+                if not self.allow_cut_left  and cx - r < 0: cx = bx
+                if not self.allow_cut_right and cx + r > L: cx = bx
+            if not periodic_tb:
+                if not self.allow_cut_bottom and cy - r < 0: cy = by
+                if not self.allow_cut_top    and cy + r > L: cy = by
+
+            # Exact overlap guard (jitter may push into a neighbour)
+            if centers:
+                pts_arr = np.asarray(centers)
+                rad_arr = np.asarray(radii)
+                d2 = np.sum((pts_arr - np.array([cx, cy])) ** 2, axis=1)
+                if np.any(d2 < (rad_arr + r + min_dist) ** 2):
+                    # Retry without jitter
+                    cx, cy = bx, by
+                    d2 = np.sum((pts_arr - np.array([cx, cy])) ** 2, axis=1)
+                    if np.any(d2 < (rad_arr + r + min_dist) ** 2):
+                        continue  # grid point itself is now invalid – skip
+
+            # --- Accept ---
+            centers.append([cx, cy])
+            radii.append(r)
+            current_area += np.pi * r ** 2
+
+            # Incremental clearance update for the newly placed hole
+            new_clr = np.sqrt(
+                (cand[:, 0] - cx) ** 2 + (cand[:, 1] - cy) ** 2
+            ) - r
+            hole_clr = np.minimum(hole_clr, new_clr)
+
+            # Periodic mirrors
+            mirrors: List[Tuple[float, float]] = []
+            if periodic_lr:
+                if cx - r < 0: mirrors.append((cx + L, cy))
+                if cx + r > L: mirrors.append((cx - L, cy))
+            if periodic_tb:
+                if cy - r < 0: mirrors.append((cx, cy + L))
+                if cy + r > L: mirrors.append((cx, cy - L))
+            if periodic_lr and periodic_tb:
+                if cx - r < 0 and cy - r < 0: mirrors.append((cx + L, cy + L))
+                if cx - r < 0 and cy + r > L: mirrors.append((cx + L, cy - L))
+                if cx + r > L and cy - r < 0: mirrors.append((cx - L, cy + L))
+                if cx + r > L and cy + r > L: mirrors.append((cx - L, cy - L))
+            for mx, my in mirrors:
+                if mx + r > 0 and mx - r < L and my + r > 0 and my - r < L:
+                    centers.append([mx, my])
+                    radii.append(r)
+                    current_area += np.pi * r ** 2
+                    mir_clr = np.sqrt(
+                        (cand[:, 0] - mx) ** 2 + (cand[:, 1] - my) ** 2
+                    ) - r
+                    hole_clr = np.minimum(hole_clr, mir_clr)
+
+        achieved = current_area / (L * L)
+        if achieved < self.porosity * 0.95:
+            warnings.warn(
+                f"VGP hole placement achieved approximate porosity "
+                f"{achieved:.4f} (target: {self.porosity:.4f}). "
+                f"Consider reducing min_distance or hole sizes."
+            )
+
+        if not centers:
+            warnings.warn("VGP: no holes were placed.")
             return np.array([]).reshape(0, 2), np.array([])
 
         return np.array(centers), np.array(radii)
@@ -5747,6 +6295,12 @@ def preview_random_mesh(
         edge_right=w_r,
         edge_bottom=w_b,
         edge_top=w_t,
+        hole_size_distribution=getattr(config, 'hole_size_distribution', 'normal'),
+        hole_size_skew_strength=getattr(config, 'hole_size_skew_strength', 2.5),
+        placement_algorithm=getattr(config, 'placement_algorithm', 'rsa'),
+        ls_max_steps=getattr(config, 'ls_max_steps', 3000),
+        ls_resolve_iters=getattr(config, 'ls_resolve_iters', 80),
+        ls_growth_rate=getattr(config, 'ls_growth_rate', 0.02),
     )
 
     # --- rescale if edge strips are used -----------------------------------
@@ -5888,6 +6442,12 @@ def create_random_mesh(
         edge_right=w_r,
         edge_bottom=w_b,
         edge_top=w_t,
+        hole_size_distribution=getattr(config, 'hole_size_distribution', 'normal'),
+        hole_size_skew_strength=getattr(config, 'hole_size_skew_strength', 2.5),
+        placement_algorithm=getattr(config, 'placement_algorithm', 'rsa'),
+        ls_max_steps=getattr(config, 'ls_max_steps', 3000),
+        ls_resolve_iters=getattr(config, 'ls_resolve_iters', 80),
+        ls_growth_rate=getattr(config, 'ls_growth_rate', 0.02),
     )
 
     print(f"Random holes placed: {len(generator.hole_centers)} holes "

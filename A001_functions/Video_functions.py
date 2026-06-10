@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
+import gc
 import os
 import json
 import pickle
@@ -1485,9 +1486,11 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
     if max_parallel > 1:
         with ProcessPoolExecutor(max_workers=max_parallel) as executor:
             list(executor.map(_create_single_frame_object, tasks))
+        gc.collect()
     else:
         for task in tasks:
             _create_single_frame_object(task)
+            gc.collect()
 
 
 def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format='png'):

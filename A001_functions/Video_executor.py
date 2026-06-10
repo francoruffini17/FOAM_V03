@@ -3,15 +3,18 @@ import sys
 from .Video_functions import *
 
 # Get sim_num and property_file from command-line arguments
-# Usage: python -m A001_functions.Video_executor <sim_num> <properties_id> [--parallel <n>]
+# Usage: python -m A001_functions.Video_executor <sim_num> <properties_id> [max_parallel]
+#        python -m A001_functions.Video_executor <sim_num> <properties_id> --parallel <n>
 sim_num = int(sys.argv[1])
 file_name = f"F001_Video_properties_files/Video_properties_{sys.argv[2]}.py"
 
-# Optional --parallel flag
+# Accept max_parallel as either a positional 3rd argument or --parallel <n> flag
 max_parallel_override = None
 if '--parallel' in sys.argv:
     idx = sys.argv.index('--parallel')
     max_parallel_override = int(sys.argv[idx + 1])
+elif len(sys.argv) > 3 and sys.argv[3].lstrip('-').isdigit():
+    max_parallel_override = int(sys.argv[3])
 
 # Load the module dynamically
 spec = importlib.util.spec_from_file_location("video_properties", file_name)

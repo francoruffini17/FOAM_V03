@@ -584,8 +584,173 @@ FI3005.num_frames = num_frames
 FI3005.file_ext = 'I3_BFS_3005'
 
 
+FFH3001 = graph_property()
+FFH3001.ppty = 'f'
+FFH3001.tension_compression = 'comb'
+FFH3001.legends = True
+FFH3001.grid = True
+FFH3001.Title = None
+FFH3001.xlabel = 'Compression Ratio'
+FFH3001.ylabel = 'Tension / Compression \n efficiency'
+FFH3001.save_path = 'frames_10/'
+FFH3001.legend_loc = 'upper right'
+FFH3001.dpi = 100
+FFH3001.figsize = (4.75,4)
+FFH3001.num_frames = num_frames
+FFH3001.file_ext = 'H3_BFS_3001'
+FFH3001.yscale = 'log'
+
+FFI3001 = graph_property()
+FFI3001.ppty = 'f'
+FFI3001.tension_compression = 'comb'
+FFI3001.legends = True
+FFI3001.grid = True
+FFI3001.Title = None
+FFI3001.xlabel = 'Compression Ratio'
+FFI3001.ylabel = 'Tension / Compression \n efficiency'
+FFI3001.save_path = 'frames_10/'
+FFI3001.legend_loc = 'upper right'
+FFI3001.dpi = 100
+FFI3001.figsize = (4.75,4)
+FFI3001.num_frames = num_frames
+FFI3001.file_ext = 'I3_BFS_3001'
+FFI3001.yscale = 'log'
+
+
+FFH3002 = graph_property()
+FFH3002.ppty = 'f'
+FFH3002.tension_compression = 'comb'
+FFH3002.legends = True
+FFH3002.grid = True
+FFH3002.Title = None
+FFH3002.xlabel = 'Compression Ratio'
+FFH3002.ylabel = 'Tension / Compression \n efficiency'
+FFH3002.save_path = 'frames_10/'
+FFH3002.legend_loc = 'upper right'
+FFH3002.dpi = 100
+FFH3002.figsize = (4.75,4)
+FFH3002.num_frames = num_frames
+FFH3002.file_ext = 'H3_BFS_3002'
+FFH3002.yscale = 'log'
+
+FFI3002 = graph_property()
+FFI3002.ppty = 'f'
+FFI3002.tension_compression = 'comb'
+FFI3002.legends = True
+FFI3002.grid = True
+FFI3002.Title = None
+FFI3002.xlabel = 'Compression Ratio'
+FFI3002.ylabel = 'Tension / Compression \n efficiency'
+FFI3002.save_path = 'frames_10/'
+FFI3002.legend_loc = 'upper right'
+FFI3002.dpi = 100
+FFI3002.figsize = (4.75,4)
+FFI3002.num_frames = num_frames
+FFI3002.file_ext = 'I3_BFS_3002'
+FFI3002.yscale = 'log'
+
+
+FFH3003 = graph_property()
+FFH3003.ppty = 'f'
+FFH3003.tension_compression = 'comb'
+FFH3003.legends = True
+FFH3003.grid = True
+FFH3003.Title = None
+FFH3003.xlabel = 'Compression Ratio'
+FFH3003.ylabel = 'Tension / Compression \n efficiency'
+FFH3003.save_path = 'frames_10/'
+FFH3003.legend_loc = 'upper right'
+FFH3003.dpi = 100
+FFH3003.figsize = (4.75,4)
+FFH3003.num_frames = num_frames
+FFH3003.file_ext = 'H3_BFS_3003'
+FFH3003.yscale = 'log'
+
+FFI3003 = graph_property()
+FFI3003.ppty = 'f'
+FFI3003.tension_compression = 'comb'
+FFI3003.legends = True
+FFI3003.grid = True
+FFI3003.Title = None
+FFI3003.xlabel = 'Compression Ratio'
+FFI3003.ylabel = 'Tension / Compression \n efficiency'
+FFI3003.save_path = 'frames_10/'
+FFI3003.legend_loc = 'upper right'
+FFI3003.dpi = 100
+FFI3003.figsize = (4.75,4)
+FFI3003.num_frames = num_frames
+FFI3003.file_ext = 'I3_BFS_3003'
+FFI3003.yscale = 'log'
+
+
+FFH3004 = graph_property()
+FFH3004.ppty = 'f'
+FFH3004.tension_compression = 'comb'
+FFH3004.legends = True
+FFH3004.grid = True
+FFH3004.Title = None
+FFH3004.xlabel = 'Compression Ratio'
+FFH3004.ylabel = 'Tension / Compression \n efficiency'
+FFH3004.save_path = 'frames_10/'
+FFH3004.legend_loc = 'upper right'
+FFH3004.dpi = 100
+FFH3004.figsize = (4.75,4)
+FFH3004.num_frames = num_frames
+FFH3004.file_ext = 'H3_BFS_3004'
+FFH3004.yscale = 'log'
+
+FFI3004 = graph_property()
+FFI3004.ppty = 'f'
+FFI3004.tension_compression = 'comb'
+FFI3004.legends = True
+FFI3004.grid = True
+FFI3004.Title = None
+FFI3004.xlabel = 'Compression Ratio'
+FFI3004.ylabel = 'Tension / Compression \n efficiency'
+FFI3004.save_path = 'frames_10/'
+FFI3004.legend_loc = 'upper right'
+FFI3004.dpi = 100
+FFI3004.figsize = (4.75,4)
+FFI3004.num_frames = num_frames
+FFI3004.file_ext = 'I3_BFS_3004'
+FFI3004.yscale = 'log'
+
+
+FFH3005 = graph_property()
+FFH3005.ppty = 'f'
+FFH3005.tension_compression = 'comb'
+FFH3005.legends = True
+FFH3005.grid = True
+FFH3005.Title = None
+FFH3005.xlabel = 'Compression Ratio'
+FFH3005.ylabel = 'Tension / Compression \n efficiency'
+FFH3005.save_path = 'frames_10/'
+FFH3005.legend_loc = 'upper right'
+FFH3005.dpi = 100
+FFH3005.figsize = (4.75,4)
+FFH3005.num_frames = num_frames
+FFH3005.file_ext = 'H3_BFS_3005'
+FFH3005.yscale = 'log'
+
+FFI3005 = graph_property()
+FFI3005.ppty = 'f'
+FFI3005.tension_compression = 'comb'
+FFI3005.legends = True
+FFI3005.grid = True
+FFI3005.Title = None
+FFI3005.xlabel = 'Compression Ratio'
+FFI3005.ylabel = 'Tension / Compression \n efficiency'
+FFI3005.save_path = 'frames_10/'
+FFI3005.legend_loc = 'upper right'
+FFI3005.dpi = 100
+FFI3005.figsize = (4.75,4)
+FFI3005.num_frames = num_frames
+FFI3005.file_ext = 'I3_BFS_3005'
+FFI3005.yscale = 'log'
+
+
 T = frames_combination()
-T.canvas_size = (3500, 3000)
+T.canvas_size = (3500, 3900)
 # T.title = "Deformation {DATA['U2']['Y-POSITIVE'][ti]:0.2f} mm | E = {DATA_J['E']} MPa | Ei = {DATA_J['steps'][0]['Pressure_BC']} MPa"
 T.title = "Deformation {-DATA['U2']['PERN-9999997'][ti]:0.2f} mm | E = {DATA_J['E']} MPa | Pi = {DATA_J['steps'][0]['Pressure_BC']} MPa | Porosity = {porosity}"
 # T.title = " SIN TITULO"
@@ -718,6 +883,16 @@ T.elements = [
     },
     {
         "position": (600, 1980),
+        "size": (500, 500),
+        "path": "frames_FFH3001/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFH3001,
+        "replace_frames": True,
+    },
+    {
+        "position": (600, 2530),
         "size": (230, 230),
         "path": "frames_IT3001/",
         "subtitle": "",
@@ -729,7 +904,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (870, 1980),
+        "position": (870, 2530),
         "size": (230, 230),
         "path": "frames_IC3001/",
         "subtitle": "",
@@ -741,7 +916,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (600, 2250),
+        "position": (600, 2800),
         "size": (500, 500),
         "path": "frames_FI3001/",
         "subtitle": "",
@@ -749,9 +924,16 @@ T.elements = [
         "type": 'GP',
         "object": FI3001,
         "replace_frames": False,
-        # "subtitle": 'S11 + S22',
-        # "subtitle_size": 1,
-        # "subtitle_offset": 20,
+    },
+    {
+        "position": (600, 3350),
+        "size": (500, 500),
+        "path": "frames_FFI3001/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFI3001,
+        "replace_frames": True,
     },
     {
         "position": (1200, 100),
@@ -818,6 +1000,16 @@ T.elements = [
     },
     {
         "position": (1200, 1980),
+        "size": (500, 500),
+        "path": "frames_FFH3002/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFH3002,
+        "replace_frames": True,
+    },
+    {
+        "position": (1200, 2530),
         "size": (230, 230),
         "path": "frames_IT3002/",
         "subtitle": "",
@@ -829,7 +1021,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (1470, 1980),
+        "position": (1470, 2530),
         "size": (230, 230),
         "path": "frames_IC3002/",
         "subtitle": "",
@@ -841,7 +1033,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (1200, 2250),
+        "position": (1200, 2800),
         "size": (500, 500),
         "path": "frames_FI3002/",
         "subtitle": "",
@@ -849,9 +1041,16 @@ T.elements = [
         "type": 'GP',
         "object": FI3002,
         "replace_frames": False,
-        # "subtitle": 'S11 + S22',
-        # "subtitle_size": 1,
-        # "subtitle_offset": 20,
+    },
+    {
+        "position": (1200, 3350),
+        "size": (500, 500),
+        "path": "frames_FFI3002/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFI3002,
+        "replace_frames": True,
     },
     {
         "position": (1800, 100),
@@ -918,6 +1117,16 @@ T.elements = [
     },
     {
         "position": (1800, 1980),
+        "size": (500, 500),
+        "path": "frames_FFH3003/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFH3003,
+        "replace_frames": True,
+    },
+    {
+        "position": (1800, 2530),
         "size": (230, 230),
         "path": "frames_IT3003/",
         "subtitle": "",
@@ -929,7 +1138,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (2070, 1980),
+        "position": (2070, 2530),
         "size": (230, 230),
         "path": "frames_IC3003/",
         "subtitle": "",
@@ -941,7 +1150,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (1800, 2250),
+        "position": (1800, 2800),
         "size": (500, 500),
         "path": "frames_FI3003/",
         "subtitle": "",
@@ -949,11 +1158,18 @@ T.elements = [
         "type": 'GP',
         "object": FI3003,
         "replace_frames": False,
-        # "subtitle": 'S11 + S22',
-        # "subtitle_size": 1,
-        # "subtitle_offset": 20,
     },
-        {
+    {
+        "position": (1800, 3350),
+        "size": (500, 500),
+        "path": "frames_FFI3003/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFI3003,
+        "replace_frames": True,
+    },
+    {
         "position": (2400, 1180),
         "size": (230, 230),
         "path": "frames_HT3004/",
@@ -992,6 +1208,16 @@ T.elements = [
     },
     {
         "position": (2400, 1980),
+        "size": (500, 500),
+        "path": "frames_FFH3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFH3004,
+        "replace_frames": True,
+    },
+    {
+        "position": (2400, 2530),
         "size": (230, 230),
         "path": "frames_IT3004/",
         "subtitle": "",
@@ -1003,7 +1229,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (2670, 1980),
+        "position": (2670, 2530),
         "size": (230, 230),
         "path": "frames_IC3004/",
         "subtitle": "",
@@ -1015,7 +1241,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (2400, 2250),
+        "position": (2400, 2800),
         "size": (500, 500),
         "path": "frames_FI3004/",
         "subtitle": "",
@@ -1023,9 +1249,16 @@ T.elements = [
         "type": 'GP',
         "object": FI3004,
         "replace_frames": False,
-        # "subtitle": 'S11 + S22',
-        # "subtitle_size": 1,
-        # "subtitle_offset": 20,
+    },
+    {
+        "position": (2400, 3350),
+        "size": (500, 500),
+        "path": "frames_FFI3004/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFI3004,
+        "replace_frames": True,
     },
     {
         "position": (3000, 1180),
@@ -1066,6 +1299,16 @@ T.elements = [
     },
     {
         "position": (3000, 1980),
+        "size": (500, 500),
+        "path": "frames_FFH3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFH3005,
+        "replace_frames": True,
+    },
+    {
+        "position": (3000, 2530),
         "size": (230, 230),
         "path": "frames_IT3005/",
         "subtitle": "",
@@ -1077,7 +1320,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (3270, 1980),
+        "position": (3270, 2530),
         "size": (230, 230),
         "path": "frames_IC3005/",
         "subtitle": "",
@@ -1089,7 +1332,7 @@ T.elements = [
         # "subtitle_offset": 20,
     },
     {
-        "position": (3000, 2250),
+        "position": (3000, 2800),
         "size": (500, 500),
         "path": "frames_FI3005/",
         "subtitle": "",
@@ -1097,9 +1340,16 @@ T.elements = [
         "type": 'GP',
         "object": FI3005,
         "replace_frames": False,
-        # "subtitle": 'S11 + S22',
-        # "subtitle_size": 1,
-        # "subtitle_offset": 20,
+    },
+    {
+        "position": (3000, 3350),
+        "size": (500, 500),
+        "path": "frames_FFI3005/",
+        "subtitle": "",
+        "create_frames": True,
+        "type": 'GP',
+        "object": FFI3005,
+        "replace_frames": True,
     },
 
 ]
