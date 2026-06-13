@@ -27,6 +27,7 @@ importlib.reload(_mf)
 from A001_functions.mesh_functions import plot_foam_mesh
 from A001_functions.mesh_functions import plot_J1_graph_mesh
 from A001_functions.mesh_functions import plot_T1_triangulation_mesh
+from A001_functions.mesh_functions import plot_Q1_quadrangulation_mesh
 from A001_functions.fem_stress_interpolation import interpolate_stress
 
 ### ----------------------------- plot frame graph parameter -----------------------------##
@@ -54,6 +55,7 @@ class graph_property:
     file_ext: str = 'G2'  # File name (not used directly in plotting)
     xscale: str = 'linear'  # X-axis scale
     yscale: str = 'linear'  # Y-axis scale
+    include_allnodes: bool = False  # For 'G_eff': also plot the all-nodes-normalised efficiency (global_ef_*_allnodes keys)
 
 
 def create_graph_property_frame(pkl_G2,T):
@@ -102,7 +104,14 @@ def create_graph_property_frame(pkl_G2,T):
             if T.t_x >0:
                 plt.plot(pkl_G2['t'][T.t_x],sg_t[T.t_x],'kx')
 
-        
+        # All-nodes-normalised efficiency overlay (NaN for H2/I2 pickles
+        # created before 'n_nodes_total' existed - curve simply not drawn)
+        if T.ppty == 'G_eff' and T.include_allnodes and 'global_ef_t_allnodes' in pkl_G2:
+            sg_t_all = np.array(pkl_G2['global_ef_t_allnodes'], dtype=float)
+            plt.plot(pkl_G2['t'][1:], sg_t_all[1:], '--', color='darkred',
+                     label='Tension graph (all nodes)')
+            if T.t_x is not None and T.t_x > 0:
+                plt.plot(pkl_G2['t'][T.t_x], sg_t_all[T.t_x], 'kx')
 
 
     if T.tension_compression in ['both', 'compression']:
@@ -124,10 +133,18 @@ def create_graph_property_frame(pkl_G2,T):
 
         plt.plot(pkl_G2['t'][1:],sg_c[1:],'b',label = 'Compression graph')
 
-        
+
         if T.t_x is not None:
             if T.t_x > 0:
                 plt.plot(pkl_G2['t'][T.t_x],sg_c[T.t_x],'kx')
+
+        # All-nodes-normalised efficiency overlay (see tension branch note)
+        if T.ppty == 'G_eff' and T.include_allnodes and 'global_ef_c_allnodes' in pkl_G2:
+            sg_c_all = np.array(pkl_G2['global_ef_c_allnodes'], dtype=float)
+            plt.plot(pkl_G2['t'][1:], sg_c_all[1:], '--', color='darkblue',
+                     label='Compression graph (all nodes)')
+            if T.t_x is not None and T.t_x > 0:
+                plt.plot(pkl_G2['t'][T.t_x], sg_c_all[T.t_x], 'kx')
 
 
     if T.tension_compression in ['comb']:
@@ -1047,6 +1064,180 @@ def create_animation_T1_multiple_frames(sim_num, T, save_path=None, frames_forma
         T.save_path = save_path + f'frame_{ti:08d}.{frames_format}'
         T.t_x = ti
         create_animation_T1_frame(data_C2, data_T1, T=T, ti=ti, t2=data_T2)
+
+
+### ---- PLOT ANIMATION Q1 QUADRANGULATION ---- ###
+
+@dataclass
+class frame_animation_Q1:
+    dpi: int = 50
+    title: str = None
+    xlabel: str = None
+    ylabel: str = None
+    xlim: float = None
+    ylim: float = None
+    save_path: str = None
+    background: bool = False
+    figsize: list[float] = None
+    num_frames: int = None
+    Q1_ext: str = ''
+    Q2_ext: str = None
+    plot_Q1_params: PlotT1Params = field(default_factory=PlotT1Params)
+    plot_Mesh_Graph_params: PlotMeshGraphParams = field(default_factory=PlotMeshGraphParams)
+
+
+def create_animation_Q1_frame(c2, q1, Q=None, ti=None, q2=None):
+    """
+    Create a single animation frame with the Q1 quadrangulation mesh overlaid
+    on the foam FEM mesh.
+
+    Parameters
+    ----------
+    c2 : dict   DATA_C2 dictionary.
+    q1 : dict   DATA_Q1 dictionary.
+    Q  : frame_animation_Q1   Frame configuration object.
+    ti : int    Timestep index (0-based).
+    q2 : dict, optional   DATA_Q2 dictionary for non-area colouring.
+    """
+    _color_by      = Q.plot_Q1_params.color_by
+    _color_by_area = (_color_by != 'none')
+    _custom_values = None
+    _cb_label      = Q.plot_Q1_params.colorbar_label
+
+    if _color_by not in ('area', 'none'):
+        elem_ids = sorted(q1['elements'].keys())
+        if isinstance(_color_by, tuple) and len(_color_by) == 2:
+            _top_key, _sub_key = _color_by
+            if q2 is not None and _top_key in q2 and _sub_key in q2[_top_key]:
+                try:
+                    _custom_values = np.array(
+                        [q2[_top_key][_sub_key][eid][ti] for eid in elem_ids], dtype=float
+                    )
+                    if _cb_label is None:
+                        _cb_label = f"{_top_key}{list(_sub_key)}"
+                except (KeyError, TypeError, IndexError) as _e:
+                    print(f"Warning: could not read Q2['{_top_key}'][{_sub_key}] at ti={ti}: {_e}")
+            else:
+                print(f"Warning: color_by={_color_by!r} requested but Q2 data not available; "
+                      "falling back to area colouring.")
+        elif q2 is not None and _color_by in q2:
+            try:
+                _custom_values = np.array(
+                    [q2[_color_by][eid][ti] for eid in elem_ids], dtype=float
+                )
+                if _cb_label is None:
+                    _cb_label = _color_by
+            except (KeyError, TypeError, IndexError) as _e:
+                print(f"Warning: could not read Q2['{_color_by}'] at ti={ti}: {_e}")
+        else:
+            print(f"Warning: color_by='{_color_by}' requested but Q2 data not available; "
+                  "falling back to area colouring.")
+
+    ax = plot_Q1_quadrangulation_mesh(
+        q1, ti,
+        figsize=Q.plot_Q1_params.figsize,
+        title=Q.plot_Q1_params.title,
+        show_edges=Q.plot_Q1_params.show_edges,
+        edge_color=Q.plot_Q1_params.edge_color,
+        linewidth=Q.plot_Q1_params.linewidth,
+        show_nodes=Q.plot_Q1_params.show_nodes,
+        show_node_labels=Q.plot_Q1_params.show_node_labels,
+        node_color=Q.plot_Q1_params.node_color,
+        node_size=Q.plot_Q1_params.node_size,
+        color_by_area=_color_by_area,
+        custom_values=_custom_values,
+        colorbar_label=_cb_label,
+        cmap=Q.plot_Q1_params.cmap,
+        vmin=Q.plot_Q1_params.vmin,
+        vmax=Q.plot_Q1_params.vmax,
+        color_limit=Q.plot_Q1_params.color_limit,
+        face_color=Q.plot_Q1_params.face_color,
+        face_alpha=Q.plot_Q1_params.face_alpha,
+        show_undeformed=Q.plot_Q1_params.show_undeformed,
+        undeformed_edge_color=Q.plot_Q1_params.undeformed_edge_color,
+        magnification=Q.plot_Q1_params.magnification,
+        node_scale=Q.plot_Q1_params.node_scale,
+        show_colorbar=Q.plot_Q1_params.show_colorbar,
+    )
+
+    plot_foam_mesh(
+        c2['nodes_time'][ti], elements=c2['elements'], ax=ax,
+        elements_to_plot=Q.plot_Mesh_Graph_params.elements_to_plot,
+        show_element_numbers=Q.plot_Mesh_Graph_params.show_element_numbers,
+        node_size=Q.plot_Mesh_Graph_params.node_size,
+        plot_barycenters=Q.plot_Mesh_Graph_params.plot_barycenters,
+        barycenter_size=Q.plot_Mesh_Graph_params.barycenter_size,
+        boundary_only=Q.plot_Mesh_Graph_params.boundary_only,
+        boundary_lw=Q.plot_Mesh_Graph_params.boundary_lw,
+        boundary_color=Q.plot_Mesh_Graph_params.boundary_color,
+    )
+
+    if Q.xlim is not None:
+        ax.set_xlim(Q.xlim)
+    if Q.ylim is not None:
+        ax.set_ylim(Q.ylim)
+    if Q.xlabel is not None:
+        ax.set_xlabel(Q.xlabel)
+    if Q.ylabel is not None:
+        ax.set_ylabel(Q.ylabel)
+    if Q.title is not None:
+        ax.set_title(Q.title)
+    if Q.background == False:
+        ax.set_axis_off()
+        ax.grid(False)
+
+    fig = ax.get_figure()
+    if Q.save_path:
+        fig.savefig(Q.save_path, dpi=Q.dpi, bbox_inches='tight', transparent=True)
+        plt.close(fig)
+        print(f"Frame saved to {Q.save_path}")
+    else:
+        plt.show()
+
+
+def create_animation_Q1_multiple_frames(sim_num, Q, save_path=None, frames_format='png'):
+    """
+    Create multiple Q1 animation frames for a simulation.
+
+    Loads DATA_C2 and DATA_Q1 pickles, then renders one frame per
+    timestep (or a subset if Q.num_frames is set).
+    """
+    with open(f'I001_Results/DATA_PICK_{sim_num:03d}_C2.pkl', 'rb') as f:
+        data_C2 = pickle.load(f)
+
+    q1_suffix = f'_Q1_{Q.Q1_ext}' if Q.Q1_ext else '_Q1'
+    q1_path   = f'I001_Results/DATA_PICK_{sim_num:03d}{q1_suffix}.pkl'
+    with open(q1_path, 'rb') as f:
+        data_Q1 = pickle.load(f)
+
+    data_Q2 = None
+    if Q.plot_Q1_params.color_by not in ('area', 'none'):
+        if Q.Q2_ext is not None:
+            q2_suffix = f'_Q2_{Q.Q2_ext}' if Q.Q2_ext else '_Q2'
+            q2_path   = f'I001_Results/DATA_PICK_{sim_num:03d}{q2_suffix}.pkl'
+            try:
+                with open(q2_path, 'rb') as f:
+                    data_Q2 = pickle.load(f)
+                print(f"Loaded Q2 data from {q2_path}")
+            except FileNotFoundError:
+                print(f"Warning: Q2 data not found at {q2_path}; "
+                      "defaulting to area colouring.")
+        else:
+            print(f"Warning: color_by='{Q.plot_Q1_params.color_by}' requires "
+                  "Q2_ext to be set on frame_animation_Q1.")
+
+    os.makedirs(save_path, exist_ok=True)
+
+    total_frames = len(data_C2['t'])
+    if getattr(Q, 'num_frames', None) is not None and Q.num_frames is not None and Q.num_frames < total_frames:
+        indices = np.linspace(0, total_frames - 1, Q.num_frames, dtype=int)
+    else:
+        indices = range(total_frames)
+
+    for ti in indices:
+        Q.save_path = save_path + f'frame_{ti:08d}.{frames_format}'
+        Q.t_x = ti
+        create_animation_Q1_frame(data_C2, data_Q1, Q=Q, ti=ti, q2=data_Q2)
 
 
 

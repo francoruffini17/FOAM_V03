@@ -500,17 +500,27 @@ def _compute_global_efficiency_exact(G_nx, algorithm=None):
     algorithm : str or None, optional
         ``None`` (default) uses igraph ``shortest_paths``;
         ``'bfs'`` uses Breadth-First Search (unweighted graphs).
+
+    Returns
+    -------
+    (efficiency, pair_sum) : tuple of float
+        ``efficiency`` is the standard global efficiency
+        ``pair_sum / (n * (n - 1))`` with *n* the graph's node count;
+        ``pair_sum`` is the raw sum of ``1/d(i, j)`` over all ordered
+        pairs, so callers can re-normalise with a different node count.
     """
     n = len(G_nx)
     if n < 2:
-        return 0.0
+        return 0.0, 0.0
     G_ig = ig.Graph.from_networkx(G_nx)
 
     if algorithm == 'bfs':
         # BFS-based all-pairs shortest paths (unweighted)
         # G_ig.bfs(source) returns (vertices, layer_starts, parents):
-        #   vertices    – vertex IDs in BFS visit order
-        #   layer_starts – indices into `vertices` where each new layer begins
+        #   vertices    – vertex IDs in BFS visit order (only the vertices
+        #                 reachable from `source`; unreachable ones stay inf)
+        #   layer_starts – indices into `vertices` where each new layer begins,
+        #                 ending with a sentinel equal to len(vertices)
         #   parents     – parent of each vertex in the BFS tree
         dist = np.full((n, n), np.inf)
         for source in range(n):
@@ -520,12 +530,6 @@ def _compute_global_efficiency_exact(G_nx, algorithm=None):
                 end = layer_starts[layer_idx + 1]
                 for pos in range(start, end):
                     dist[source, vertices[pos]] = layer_idx
-            # Last layer: from last start index to end of vertices list
-            if layer_starts:
-                start = layer_starts[-1]
-                for pos in range(start, len(vertices)):
-                    if vertices[pos] >= 0:
-                        dist[source, vertices[pos]] = len(layer_starts) - 1
         dist[dist == 0] = np.inf
     else:
         dist = G_ig.shortest_paths()
@@ -534,15 +538,25 @@ def _compute_global_efficiency_exact(G_nx, algorithm=None):
 
     eff_matrix = 1.0 / dist
     eff_matrix[~np.isfinite(eff_matrix)] = 0.0
-    return eff_matrix.sum() / (n * (n - 1))
+    pair_sum = float(eff_matrix.sum())
+    return pair_sum / (n * (n - 1)), pair_sum
 
 
 def _process_timestep_exact(args):
     """Worker function for a single timestep (picklable for multiprocessing)."""
-    i, G_tension, G_compression, algorithm = args
-    eff_t = _compute_global_efficiency_exact(G_tension, algorithm)
-    eff_c = _compute_global_efficiency_exact(G_compression, algorithm)
-    return i, eff_t, eff_c
+    i, G_tension, G_compression, algorithm, n_total = args
+    eff_t, sum_t = _compute_global_efficiency_exact(G_tension, algorithm)
+    eff_c, sum_c = _compute_global_efficiency_exact(G_compression, algorithm)
+    if n_total is not None and n_total >= 2:
+        norm_all = n_total * (n_total - 1)
+        eff_t_all = sum_t / norm_all
+        eff_c_all = sum_c / norm_all
+    else:
+        # Total node count unknown (e.g. H2/I2 pickle created before
+        # 'n_nodes_total' was added) - store NaN rather than a misleading value.
+        eff_t_all = float('nan')
+        eff_c_all = float('nan')
+    return i, eff_t, eff_c, eff_t_all, eff_c_all
 
 
 def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=None):
@@ -589,14 +603,21 @@ def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=No
     print(f"create_PKL_G2_exact: {total_steps} timesteps, {n_workers} workers, algorithm={algorithm}")
 
     # ---- Build task list -----------------------------------------------
+    # n_nodes_total: total overlay-graph node count (including isolated
+    # nodes that never enter the tension/compression graphs).  Stored by
+    # create_PKL_H2; None for pickles created before the key existed.
+    n_nodes_total = DATA_G.get('n_nodes_total')
+
     tasks = [
-        (i, DATA_G['tension'][i], DATA_G['compression'][i], algorithm)
+        (i, DATA_G['tension'][i], DATA_G['compression'][i], algorithm, n_nodes_total)
         for i in range(total_steps)
     ]
 
     # ---- Execute -------------------------------------------------------
     global_ef_t = [None] * total_steps
     global_ef_c = [None] * total_steps
+    global_ef_t_allnodes = [None] * total_steps
+    global_ef_c_allnodes = [None] * total_steps
 
     # Cannot spawn child processes from a daemon process (e.g. inside Pool workers)
     if multiprocessing.current_process().daemon:
@@ -604,23 +625,33 @@ def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=No
 
     if n_workers == 1:
         for task in tasks:
-            idx, eff_t, eff_c = _process_timestep_exact(task)
+            idx, eff_t, eff_c, eff_t_all, eff_c_all = _process_timestep_exact(task)
             global_ef_t[idx] = eff_t
             global_ef_c[idx] = eff_c
+            global_ef_t_allnodes[idx] = eff_t_all
+            global_ef_c_allnodes[idx] = eff_c_all
             print(f'  Timestep {idx + 1}/{total_steps} done')
     else:
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            for idx, eff_t, eff_c in executor.map(
+            for idx, eff_t, eff_c, eff_t_all, eff_c_all in executor.map(
                 _process_timestep_exact, tasks, chunksize=max(1, total_steps // (n_workers * 4))
             ):
                 global_ef_t[idx] = eff_t
                 global_ef_c[idx] = eff_c
+                global_ef_t_allnodes[idx] = eff_t_all
+                global_ef_c_allnodes[idx] = eff_c_all
                 print(f'  Timestep {idx + 1}/{total_steps} done')
 
     pkl_G2 = {
         't': DATA_G['t'],
         'global_ef_t': global_ef_t,
         'global_ef_c': global_ef_c,
+        # Same pairwise sums, but normalised by n_nodes_total*(n_nodes_total-1)
+        # (all overlay nodes, isolated ones included).  NaN when the input
+        # pickle predates the 'n_nodes_total' key.
+        'global_ef_t_allnodes': global_ef_t_allnodes,
+        'global_ef_c_allnodes': global_ef_c_allnodes,
+        'n_nodes_total': n_nodes_total,
         **_propagate_source_metadata(DATA_G),
     }
 
@@ -1470,6 +1501,477 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
 
 
 # ---------------------------------------------------------------------------
+# Q1 pickle: quad mesh data (analogous to T1 but for 4-node quad elements)
+# ---------------------------------------------------------------------------
+
+def create_PKL_Q1(
+    DATA_C2: dict,
+    quadrangulation_file: str,
+    sim_num: int,
+    output_path: str = None,
+) -> dict:
+    """
+    Create the PKL_Q1 dictionary for quadrangulation mesh data.
+
+    Analogous to create_PKL_T1 but reads 4-node quad elements from a .quad file.
+
+    Parameters
+    ----------
+    DATA_C2 : dict
+        Mesh data with keys 'nodes_time', 'elements', 't'.
+    quadrangulation_file : str
+        Path to .quad file produced by quadrangulation_generator.
+        Format: N_nodes / (x y ID per line) / N_elements / (n1 n2 n3 n4 per line).
+    sim_num : int
+        Simulation number.
+    output_path : str, optional
+        Defaults to 'I001_Results/DATA_PICK_{sim_num:03d}_Q1.pkl'.
+
+    Returns
+    -------
+    dict  PKL_Q1
+        Same key structure as PKL_T1, but elements have 4 node indices.
+    """
+    json_path = f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json'
+    with open(json_path, 'r') as fj:
+        sim_json = json.load(fj)
+
+    scale_x        = sim_json['scale_x']
+    scale_y        = sim_json['scale_y']
+    mesh_file_path = sim_json['input_name']
+
+    print(f"  Scale factors: scale_x={scale_x}, scale_y={scale_y}")
+    print(f"  Mesh file: {mesh_file_path}")
+
+    # 1. Read quadrangulation file
+    quad_nodes_raw    = []   # (x, y, ID)
+    quad_elements_raw = []   # [n1, n2, n3, n4] 0-based
+
+    with open(quadrangulation_file, 'r') as fq:
+        n_quad_nodes = int(fq.readline().strip())
+        for _ in range(n_quad_nodes):
+            parts = fq.readline().strip().replace(',', ' ').split()
+            quad_nodes_raw.append((float(parts[0]), float(parts[1]), int(parts[2])))
+        n_quad_elems = int(fq.readline().strip())
+        for _ in range(n_quad_elems):
+            parts = fq.readline().strip().replace(',', ' ').split()
+            quad_elements_raw.append([int(parts[0]), int(parts[1]),
+                                      int(parts[2]), int(parts[3])])
+
+    quad_nodes_scaled = [(x * scale_x, y * scale_y, ID)
+                         for x, y, ID in quad_nodes_raw]
+    quad_node_ids = [ID for _, _, ID in quad_nodes_scaled]
+
+    print(f"  Quadrangulation: {n_quad_nodes} nodes, {n_quad_elems} elements")
+
+    # 2. Snap quad nodes to FEM mesh nodes
+    mesh_nodes_raw, _ = read_mesh_json(mesh_file_path)
+    n_fe_nodes = len(DATA_C2['nodes_time'][0])
+    nodes_undeformed = [(float(x) * scale_x, float(y) * scale_y)
+                        for x, y, _ in mesh_nodes_raw]
+    if len(nodes_undeformed) != n_fe_nodes:
+        raise ValueError(
+            f"Mesh file has {len(nodes_undeformed)} nodes but DATA_C2 has {n_fe_nodes}"
+        )
+
+    nodes_undef_arr = np.array(nodes_undeformed, dtype=float)
+    quad_xy_scaled  = np.array([(x, y) for x, y, _ in quad_nodes_scaled], dtype=float)
+    snap_distances, matched_indices = cKDTree(nodes_undef_arr).query(quad_xy_scaled, k=1)
+    if np.isscalar(matched_indices):
+        matched_indices = np.array([matched_indices])
+        snap_distances  = np.array([snap_distances])
+
+    matched_mesh_node_ids = [int(idx) + 1 for idx in matched_indices]
+    node_matches = {
+        quad_node_id: mesh_node_id
+        for quad_node_id, mesh_node_id in enumerate(matched_mesh_node_ids, start=1)
+    }
+
+    mean_snap    = float(np.mean(snap_distances)) if n_quad_nodes else 0.0
+    max_snap     = float(np.max(snap_distances)) if n_quad_nodes else 0.0
+    unique_match = len(set(matched_mesh_node_ids))
+    print(f"  Node snapping: {n_quad_nodes} quad nodes matched to {unique_match} FEM nodes")
+    print(f"  Snap distance: mean={mean_snap:.6g}, max={max_snap:.6g}")
+
+    # 3. Area helpers (split quad into 2 triangles)
+    def _tri_area(p1, p2, p3) -> float:
+        return 0.5 * abs(
+            (p2[0] - p1[0]) * (p3[1] - p1[1]) -
+            (p3[0] - p1[0]) * (p2[1] - p1[1])
+        )
+
+    def _quad_area(p1, p2, p3, p4) -> float:
+        return _tri_area(p1, p2, p3) + _tri_area(p1, p3, p4)
+
+    original_areas = {}
+
+    # 4. Main time-loop
+    n_timesteps = len(DATA_C2['nodes_time'])
+
+    nodes_out          = [{} for _ in range(n_timesteps)]
+    elements_area      = {eid + 1: {} for eid in range(n_quad_elems)}
+    elements_area_norm = {eid + 1: {} for eid in range(n_quad_elems)}
+
+    for ti in range(n_timesteps):
+        ti_nodes = DATA_C2['nodes_time'][ti]
+        deformed_quad = np.empty((n_quad_nodes, 2), dtype=float)
+
+        for nidx in range(n_quad_nodes):
+            node_ID      = quad_node_ids[nidx]
+            mesh_node_id = matched_mesh_node_ids[nidx]
+            mesh_key     = str(mesh_node_id)
+            if mesh_key not in ti_nodes:
+                raise KeyError(
+                    f"DATA_C2['nodes_time'][{ti}] missing FEM node {mesh_key}"
+                )
+            x_def, y_def = ti_nodes[mesh_key]
+            deformed_quad[nidx] = (x_def, y_def)
+            nodes_out[ti][nidx + 1] = (float(x_def), float(y_def), node_ID)
+
+        for elem_id_0, (n1, n2, n3, n4) in enumerate(quad_elements_raw):
+            eid  = elem_id_0 + 1
+            area = _quad_area(
+                deformed_quad[n1], deformed_quad[n2],
+                deformed_quad[n3], deformed_quad[n4],
+            )
+            elements_area[eid][ti] = area
+            if ti == 0:
+                original_areas[eid] = area
+            orig = original_areas.get(eid, area)
+            elements_area_norm[eid][ti] = area / orig if orig > 1e-30 else 0.0
+
+        print(f"  Timestep {ti + 1}/{n_timesteps} done")
+
+    # 5. Assemble PKL_Q1
+    elements_out = {eid + 1: quad_elements_raw[eid] for eid in range(n_quad_elems)}
+
+    PKL_Q1 = {
+        **_source_metadata(quadrangulation_file),
+        't'                        : DATA_C2['t'],
+        'nodes'                    : nodes_out,
+        'elements'                 : elements_out,
+        'elements_area'            : elements_area,
+        'elements_area_normalized' : elements_area_norm,
+        'node_matches'             : node_matches,
+    }
+
+    # 6. Save
+    if output_path is None:
+        output_path = f'I001_Results/DATA_PICK_{sim_num:03d}_Q1.pkl'
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(output_path, 'wb') as fp:
+        pickle.dump(PKL_Q1, fp)
+    print(f"PKL_Q1 saved to '{output_path}'")
+
+    return PKL_Q1
+
+
+# ---------------------------------------------------------------------------
+# Q2 pickle: statistical summary of Q1 quad mesh (analogous to T2)
+# ---------------------------------------------------------------------------
+
+def create_PKL_Q2(DATA_Q1: dict, output_path: str = None, sim_num: int = None,
+                  w_param_sets: list = None) -> dict:
+    """
+    Compute statistical summary of element data from a PKL_Q1 dictionary.
+
+    Analogous to create_PKL_T2 for 4-node quad elements.
+    Deformation gradient F is computed via bilinear shape functions at the
+    element centroid (ξ=0, η=0).
+
+    Parameters
+    ----------
+    DATA_Q1 : dict
+        PKL_Q1 dictionary (same structure as PKL_T1 but 4-node elements).
+    output_path : str, optional
+        Defaults to 'I001_Results/DATA_PICK_{sim_num:03d}_Q2.pkl'.
+    sim_num : int, optional
+        Used to build a default output_path when output_path is None.
+    w_param_sets : list of tuple, optional
+        List of (K, G, m, n) parameter tuples for the strain energy w.
+        Defaults to [(1, 1, 1, 1)].
+
+    Returns
+    -------
+    dict  PKL_Q2
+        Same key structure as PKL_T2. 'edge_sizes' has 4 edges per element,
+        'epsilon' has 4 edge strains, 'q' = 4*A/(l1^2+l2^2+l3^2+l4^2),
+        'edi' = 1/4*(|l1/l10|+...).
+    """
+    t        = DATA_Q1['t']
+    n_t      = len(t)
+    elem_ids = sorted(DATA_Q1['elements'].keys())
+    n_elems  = len(elem_ids)
+
+    # 1. Flat area matrices
+    areas_mat = np.zeros((n_elems, n_t), dtype=float)
+    norm_mat  = np.zeros((n_elems, n_t), dtype=float)
+
+    for ei, eid in enumerate(elem_ids):
+        ea  = DATA_Q1['elements_area'][eid]
+        ean = DATA_Q1['elements_area_normalized'][eid]
+        for ti in range(n_t):
+            areas_mat[ei, ti] = ea[ti]
+            norm_mat[ei, ti]  = ean[ti]
+
+    # 2. time_variant statistics
+    tv_areas = {
+        'min' : areas_mat.min(axis=0).tolist(),
+        'max' : areas_mat.max(axis=0).tolist(),
+        'mean': areas_mat.mean(axis=0).tolist(),
+        'std' : areas_mat.std(axis=0).tolist(),
+    }
+    tv_norm = {
+        'min' : norm_mat.min(axis=0).tolist(),
+        'max' : norm_mat.max(axis=0).tolist(),
+        'mean': norm_mat.mean(axis=0).tolist(),
+        'std' : norm_mat.std(axis=0).tolist(),
+    }
+
+    # 3. time_invariant statistics
+    ti_areas = {}
+    ti_norm  = {}
+    for ei, eid in enumerate(elem_ids):
+        row      = areas_mat[ei]
+        row_norm = norm_mat[ei]
+        ti_areas[eid] = {
+            'min' : float(row.min()),  'max' : float(row.max()),
+            'mean': float(row.mean()), 'std' : float(row.std()),
+        }
+        ti_norm[eid] = {
+            'min' : float(row_norm.min()),  'max' : float(row_norm.max()),
+            'mean': float(row_norm.mean()), 'std' : float(row_norm.std()),
+        }
+
+    # 4. general_information
+    general_information = {
+        'n_elements'            : n_elems,
+        'area_global_min'       : float(areas_mat.min()),
+        'area_global_max'       : float(areas_mat.max()),
+        'norm_area_global_min'  : float(norm_mat.min()),
+        'norm_area_global_max'  : float(norm_mat.max()),
+    }
+
+    # 5. eta
+    r  = 1.0
+    it = n_elems
+    std_i = (r / 2.0) * np.sqrt(it / (it - 1))
+    eta = [1.0 - (tv_norm['std'][ti] / std_i) for ti in range(n_t)]
+
+    # 6. Per-element mechanics
+    # Bilinear shape function derivatives at centroid (ξ=0, η=0)
+    # Node order: BL(0), BR(1), TR(2), TL(3)
+    # dN/dξ row: [-1/4, 1/4, 1/4, -1/4]
+    # dN/dη row: [-1/4, -1/4, 1/4, 1/4]
+    B = np.array([[-0.25,  0.25, 0.25, -0.25],
+                  [-0.25, -0.25, 0.25,  0.25]], dtype=float)
+
+    edge_sizes = {}
+    q          = {}
+    epsilon    = {}
+    F_grad     = {}
+    shear      = {}
+    gle        = {}
+    edi        = {}
+    J_det      = {}
+    C_iso      = {}
+
+    if w_param_sets is None:
+        w_param_sets = [(1, 1, 1, 1)]
+    _w_param_sets = w_param_sets
+    w  = {params: {} for params in _w_param_sets}
+    I2 = np.eye(2)
+
+    for ei, eid in enumerate(elem_ids):
+        n1, n2, n3, n4 = DATA_Q1['elements'][eid]   # 0-based node indices
+
+        # Reference positions (t=0); nodes dict uses 1-based keys
+        p1_0 = np.array(DATA_Q1['nodes'][0][n1 + 1][:2], dtype=float)
+        p2_0 = np.array(DATA_Q1['nodes'][0][n2 + 1][:2], dtype=float)
+        p3_0 = np.array(DATA_Q1['nodes'][0][n3 + 1][:2], dtype=float)
+        p4_0 = np.array(DATA_Q1['nodes'][0][n4 + 1][:2], dtype=float)
+
+        l1_0 = float(np.linalg.norm(p2_0 - p1_0))   # BL-BR
+        l2_0 = float(np.linalg.norm(p3_0 - p2_0))   # BR-TR
+        l3_0 = float(np.linalg.norm(p4_0 - p3_0))   # TR-TL
+        l4_0 = float(np.linalg.norm(p1_0 - p4_0))   # TL-BL
+
+        # Reference Jacobian via bilinear shape functions
+        P_ref_0 = np.array([p1_0, p2_0, p3_0, p4_0], dtype=float)  # (4,2)
+        J_ref_0 = B @ P_ref_0                                         # (2,2)
+        try:
+            J_ref_0_inv_T = np.linalg.inv(J_ref_0.T)
+        except np.linalg.LinAlgError:
+            J_ref_0_inv_T = np.linalg.pinv(J_ref_0.T)
+
+        edge_sizes[eid] = {}
+        q[eid]          = {}
+        epsilon[eid]    = {}
+        F_grad[eid]     = {}
+        shear[eid]      = {}
+        gle[eid]        = {}
+        edi[eid]        = {}
+        J_det[eid]      = {}
+        C_iso[eid]      = {}
+        for params in _w_param_sets:
+            w[params][eid] = {}
+
+        for ti in range(n_t):
+            p1 = np.array(DATA_Q1['nodes'][ti][n1 + 1][:2], dtype=float)
+            p2 = np.array(DATA_Q1['nodes'][ti][n2 + 1][:2], dtype=float)
+            p3 = np.array(DATA_Q1['nodes'][ti][n3 + 1][:2], dtype=float)
+            p4 = np.array(DATA_Q1['nodes'][ti][n4 + 1][:2], dtype=float)
+
+            l1 = float(np.linalg.norm(p2 - p1))
+            l2 = float(np.linalg.norm(p3 - p2))
+            l3 = float(np.linalg.norm(p4 - p3))
+            l4 = float(np.linalg.norm(p1 - p4))
+
+            edge_sizes[eid][ti] = [l1, l2, l3, l4]
+
+            sum_l2 = l1**2 + l2**2 + l3**2 + l4**2
+            area   = areas_mat[ei, ti]
+            q[eid][ti] = (4.0 * area / sum_l2) if sum_l2 > 1e-30 else 0.0
+
+            epsilon[eid][ti] = [
+                (l1 - l1_0) / l1_0 if l1_0 > 1e-30 else 0.0,
+                (l2 - l2_0) / l2_0 if l2_0 > 1e-30 else 0.0,
+                (l3 - l3_0) / l3_0 if l3_0 > 1e-30 else 0.0,
+                (l4 - l4_0) / l4_0 if l4_0 > 1e-30 else 0.0,
+            ]
+
+            # Deformation gradient via bilinear shape functions
+            P_def = np.array([p1, p2, p3, p4], dtype=float)  # (4,2)
+            J_def = B @ P_def                                  # (2,2)
+            F_mat = J_def.T @ J_ref_0_inv_T
+            F_grad[eid][ti] = F_mat.tolist()
+
+            shear[eid][ti] = 0.5 * float(np.trace(F_mat.T @ F_mat))
+
+            E_mat = 0.5 * (F_mat.T @ F_mat - np.eye(2))
+            gle[eid][ti] = float(np.trace(E_mat))
+
+            edi[eid][ti] = (1.0 / 4.0) * (
+                (abs(l1 / l1_0) if l1_0 > 1e-30 else 0.0) +
+                (abs(l2 / l2_0) if l2_0 > 1e-30 else 0.0) +
+                (abs(l3 / l3_0) if l3_0 > 1e-30 else 0.0) +
+                (abs(l4 / l4_0) if l4_0 > 1e-30 else 0.0)
+            )
+
+            J = float(np.linalg.det(F_mat))
+            J_det[eid][ti] = J
+
+            J_pos = max(abs(J), 1e-30)
+            C_mat = (J_pos ** (-2.0 / 3.0)) * (F_mat.T @ F_mat)
+            C_iso[eid][ti] = C_mat.tolist()
+
+            for (K, G, m, n) in _w_param_sets:
+                vol = (K / 4.0) * (
+                    (1.0 / m**2) * (J_pos**m - 1.0)**2
+                    + (1.0 / m**2) * (J_pos**(-m) - 1.0)**2
+                )
+                C_n  = fractional_matrix_power(C_mat,  n)
+                C_ni = fractional_matrix_power(C_mat, -n)
+                iso = (G / 4.0) * (
+                    (1.0 / n**2) * np.linalg.norm(C_n  - I2, 'fro')**2
+                    + (1.0 / n**2) * np.linalg.norm(C_ni - I2, 'fro')**2
+                )
+                w[(K, G, m, n)][eid][ti] = float(vol + iso)
+
+    # 7. Assemble per-timestep aggregates
+    shear_mean = [float(np.mean([shear[eid][ti] for eid in elem_ids])) for ti in range(n_t)]
+    gle_mean   = [float(np.mean([gle[eid][ti]   for eid in elem_ids])) for ti in range(n_t)]
+    edi_mean   = [float(np.mean([edi[eid][ti]   for eid in elem_ids])) for ti in range(n_t)]
+
+    w_mean = {
+        params: [float(np.mean([w[params][eid][ti] for eid in elem_ids])) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    w_std = {
+        params: [float(np.std([w[params][eid][ti] for eid in elem_ids])) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    _cv_eps = 1e-30
+    w_cv = {
+        params: [float(w_std[params][ti] / (abs(w_mean[params][ti]) + _cv_eps)) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+
+    _area0     = {eid: float(DATA_Q1['elements_area'][eid][0]) for eid in elem_ids}
+    _area0_sum = max(float(sum(_area0.values())), 1e-30)
+    W = {
+        params: [float(sum(w[params][eid][ti] * _area0[eid] for eid in elem_ids)) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    _w_area_mean = {
+        params: [float(W[params][ti] / _area0_sum) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    w_std_area_weighted = {
+        params: [
+            float(np.sqrt(
+                sum(_area0[eid] * (w[params][eid][ti] - _w_area_mean[params][ti])**2
+                    for eid in elem_ids) / _area0_sum
+            ))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+    w_cv_area_weighted = {
+        params: [
+            float(w_std_area_weighted[params][ti] / (abs(_w_area_mean[params][ti]) + _cv_eps))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+
+    PKL_Q2 = {
+        **_propagate_source_metadata(DATA_Q1),
+        't': t,
+        'time_variant'        : {'areas': tv_areas, 'normalized_areas': tv_norm},
+        'time_invariant'      : {'areas': ti_areas, 'normalized_areas': ti_norm},
+        'general_information' : general_information,
+        'eta'        : eta,
+        'edge_sizes' : edge_sizes,
+        'q'          : q,
+        'epsilon'    : epsilon,
+        'F'          : F_grad,
+        'shear'      : shear,
+        'gle'        : gle,
+        'shear_mean' : shear_mean,
+        'gle_mean'   : gle_mean,
+        'edi'        : edi,
+        'edi_mean'   : edi_mean,
+        'J'          : J_det,
+        'C'          : C_iso,
+        'w'          : w,
+        'w_mean'     : w_mean,
+        'w_std'      : w_std,
+        'w_cv'       : w_cv,
+        'w_std_area_weighted': w_std_area_weighted,
+        'w_cv_area_weighted' : w_cv_area_weighted,
+        'W'          : W,
+    }
+
+    # 8. Save
+    if output_path is None and sim_num is not None:
+        output_path = f'I001_Results/DATA_PICK_{sim_num:03d}_Q2.pkl'
+
+    if output_path is not None:
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(output_path, 'wb') as fp:
+            pickle.dump(PKL_Q2, fp)
+        print(f"PKL_Q2 saved to '{output_path}'")
+
+    return PKL_Q2
+
+
+# ---------------------------------------------------------------------------
 # J1 pickle: dual-mesh nodes mapped to deformed config + bar stresses
 # ---------------------------------------------------------------------------
 
@@ -1661,6 +2163,7 @@ def create_PKL_J1(
     # ------------------------------------------------------------------
     nodes_data = [dict() for _ in range(graph.n_nodes)]
     bars_data = {bid: dict() for bid in unique_bar_ids}
+    zero_stress_fallbacks = 0
 
     for ti in range(n_timesteps):
         ti_key = str(ti + 1)
@@ -1724,6 +2227,7 @@ def create_PKL_J1(
                         ))
                 except Exception:
                     stresses.append((0.0, 0.0, 0.0))
+                    zero_stress_fallbacks += 1
 
             bars_data[bar_id][ti] = {
                 'normals': normals,
@@ -1731,6 +2235,11 @@ def create_PKL_J1(
             }
 
         print(f"  Timestep {ti + 1}/{n_timesteps} done")
+
+    if zero_stress_fallbacks > 0:
+        print(f"  WARNING: {zero_stress_fallbacks} stress lookups failed and were "
+              f"replaced with (0, 0, 0); affected bars will be classified as "
+              f"compression downstream (axial force 0).")
 
     # ------------------------------------------------------------------
     # 4.  Assemble DATA_J1
@@ -2461,15 +2970,16 @@ def create_PKL_H2(
     sim_num: int = None,
 ) -> dict:
     """
-    Create the DATA_J2 dictionary (and optionally save it as a pickle).
+    Create the DATA_H2 tension/compression graph dictionary (and optionally
+    save it as a pickle).  Used for the H2 and I2 stages, whose grid /
+    gridhex overlay bars always have exactly one segment.
 
     For every time-step the original bars are classified as *tension* or
     *compression* and placed into two separate **NetworkX** graphs.
 
     Classification
     --------------
-    The axial force of a bar is evaluated at the middle sub-bar segment
-    (or averaged over the two middle segments when the count is even)::
+    The axial force of a bar is evaluated at its (single) segment::
 
         axial_force = n^T · S · n
 
@@ -2481,37 +2991,37 @@ def create_PKL_H2(
 
     Graph construction
     ------------------
-    * **Nodes** — all *original* nodes (i.e. the first and last node of
-      each bar chain, *not* the subdivision nodes).  Each node stores
+    * **Nodes** — all *original* nodes (bar endpoints).  Each node stores
       a ``pos`` attribute with its ``(x, y)`` deformed position at that
       time-step.
-    * **Edges** — one edge per original bar (not per sub-bar).  Each
-      edge connects the two original endpoint nodes and stores
-      ``bar_id`` and ``axial_force`` attributes.
+    * **Edges** — one edge per bar, connecting its two endpoint nodes and
+      storing ``bar_id`` and ``axial_force`` attributes.
 
     Parameters
     ----------
     DATA_J1 : dict
-        Output of :func:`create_PKL_J1`.
+        Output of :func:`create_PKL_J1` (H1 / I1 data).
     output_path : str, optional
         If given, the resulting dictionary is pickled to this file.
-        When *None* and *sim_num* is provided the default path
-        ``I001_Results/DATA_PICK_{sim_num:03d}_J2.pkl`` is used.
+        When *None* nothing is saved (the dispatch loop in
+        :func:`process_simulation` handles saving).
     sim_num : int, optional
-        Simulation number (used for the default output path).
+        Simulation number (informational only).
 
     Returns
     -------
     dict
-        DATA_J2 with keys ``'t'``, ``'tension'``, ``'compression'``.
+        DATA_H2 with keys ``'t'``, ``'tension'``, ``'compression'`` and
+        ``'n_nodes_total'`` (total overlay node count, isolated nodes
+        included, for the all-nodes efficiency normalisation).
 
     Structure
     ---------
-    DATA_J2['t']
+    DATA_H2['t']
         List of timesteps (same as DATA_J1['t']).
-    DATA_J2['tension'][ti]
+    DATA_H2['tension'][ti]
         ``networkx.Graph`` containing the bars in tension at *ti*.
-    DATA_J2['compression'][ti]
+    DATA_H2['compression'][ti]
         ``networkx.Graph`` containing the bars in compression at *ti*.
     """
     t = DATA_J1['t']
@@ -2599,13 +3109,17 @@ def create_PKL_H2(
         compression[ti] = G_compression
 
     # ------------------------------------------------------------------
-    # Assemble DATA_J2
+    # Assemble DATA_H2
     # ------------------------------------------------------------------
-    DATA_J2 = {
+    DATA_H2 = {
         **_propagate_source_metadata(DATA_J1),
         't': t,
         'tension': tension,
         'compression': compression,
+        # Total overlay-graph node count, including isolated nodes that do
+        # not appear in the tension/compression graphs.  Used by
+        # create_PKL_G2_exact for the 'global_ef_*_allnodes' normalisation.
+        'n_nodes_total': len(DATA_J1['nodes']),
     }
 
     # ------------------------------------------------------------------
@@ -2616,10 +3130,10 @@ def create_PKL_H2(
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
         with open(output_path, 'wb') as f:
-            pickle.dump(DATA_J2, f)
-        print(f"DATA_J2 saved to '{output_path}'")
+            pickle.dump(DATA_H2, f)
+        print(f"DATA_H2 saved to '{output_path}'")
 
-    return DATA_J2
+    return DATA_H2
 
 def _order_sub_bar_chain(
     sub_bars: list,
@@ -2834,40 +3348,40 @@ def process_simulation(args):
             data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"J1 for simulation {i:03d}")
             data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"J1 for simulation {i:03d}")
             if data_varB is None or data_varC2 is None:
-                return
+                print(f"Skipping J1 stage for simulation {i:03d}: missing B/C2 inputs; continuing with remaining stages")
+            else:
+                # Resolve graph file path from the simulation JSON
+                mesh_prefix = _mesh_prefix_for_sim(i)
 
-            # Resolve graph file path from the simulation JSON
-            mesh_prefix = _mesh_prefix_for_sim(i)
 
+                for ext_Js in range(J_ini, J_fin + 1):
 
-            for ext_Js in range(J_ini, J_fin + 1):
+                    try:
+                        graph_path = _mesh_artifact_path(mesh_prefix, "J", ext_Js, "graph.json")
 
-                try:
-                    graph_path = _mesh_artifact_path(mesh_prefix, "J", ext_Js, "graph.json")
+                        data_J1 = create_PKL_J1(
+                            data_varB, data_varC2, graph_path,
+                            sim_num=i,
+                        )
 
-                    data_J1 = create_PKL_J1(
-                        data_varB, data_varC2, graph_path,
-                        sim_num=i,
-                    )
-
-                    pickle_file = f'I001_Results/DATA_PICK_{i:03}_J1_{ext_Js:03d}.pkl'
-                    with open(pickle_file, 'wb') as f:
-                        pickle.dump(data_J1, f)
-
-                    if in_J2 in ('y', 'Y'):
-                        data_J2 = create_PKL_J2(data_J1, sim_num=i)
-
-                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_J2_{ext_Js:03d}.pkl'
+                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_J1_{ext_Js:03d}.pkl'
                         with open(pickle_file, 'wb') as f:
-                            pickle.dump(data_J2, f)
+                            pickle.dump(data_J1, f)
 
-                        del data_J2
+                        if in_J2 in ('y', 'Y'):
+                            data_J2 = create_PKL_J2(data_J1, sim_num=i)
 
-                    del data_J1
-                except Exception as e:
-                    print(f"Error processing J1 for simulation {i:03d}, J={ext_Js:03d}: {e}")
+                            pickle_file = f'I001_Results/DATA_PICK_{i:03}_J2_{ext_Js:03d}.pkl'
+                            with open(pickle_file, 'wb') as f:
+                                pickle.dump(data_J2, f)
 
-            del data_varB, data_varC2
+                            del data_J2
+
+                        del data_J1
+                    except Exception as e:
+                        print(f"Error processing J1 for simulation {i:03d}, J={ext_Js:03d}: {e}")
+
+                del data_varB, data_varC2
 
         elif in_J2 in ('y', 'Y'):
             # J1 already exists on disk, load it
@@ -2918,41 +3432,41 @@ def process_simulation(args):
             data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"H1 for simulation {i:03d}")
             data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"H1 for simulation {i:03d}")
             if data_varB is None or data_varC2 is None:
-                return
+                print(f"Skipping H1 stage for simulation {i:03d}: missing B/C2 inputs; continuing with remaining stages")
+            else:
+                # Resolve graph file path from the simulation JSON
+                mesh_prefix = _mesh_prefix_for_sim(i)
 
-            # Resolve graph file path from the simulation JSON
-            mesh_prefix = _mesh_prefix_for_sim(i)
 
+                for ext_Hs in range(H_ini, H_fin + 1):
 
-            for ext_Hs in range(H_ini, H_fin + 1):
+                    try:
+                        graph_path = _mesh_artifact_path(mesh_prefix, "H", ext_Hs, "grid.json")
 
-                try:
-                    graph_path = _mesh_artifact_path(mesh_prefix, "H", ext_Hs, "grid.json")
+                        data_H1 = create_PKL_J1(
+                            data_varB, data_varC2, graph_path,
+                            sim_num=i,
+                        )
 
-                    data_H1 = create_PKL_J1(
-                        data_varB, data_varC2, graph_path,
-                        sim_num=i,
-                    )
-
-                    pickle_file = f'I001_Results/DATA_PICK_{i:03}_H1_{ext_Hs:03d}.pkl'
-                    with open(pickle_file, 'wb') as f:
-                        pickle.dump(data_H1, f)
-
-                    if in_H2 in ('y', 'Y'):
-                        data_H2 = create_PKL_H2(data_H1, sim_num=i)
-
-                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_H2_{ext_Hs:03d}.pkl'
+                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_H1_{ext_Hs:03d}.pkl'
                         with open(pickle_file, 'wb') as f:
-                            pickle.dump(data_H2, f)
+                            pickle.dump(data_H1, f)
 
-                        del data_H2
+                        if in_H2 in ('y', 'Y'):
+                            data_H2 = create_PKL_H2(data_H1, sim_num=i)
 
-                    del data_H1
+                            pickle_file = f'I001_Results/DATA_PICK_{i:03}_H2_{ext_Hs:03d}.pkl'
+                            with open(pickle_file, 'wb') as f:
+                                pickle.dump(data_H2, f)
 
-                except Exception as e:
-                    print(f"Error processing H1 for simulation {i:03d}, H={ext_Hs:03d}: {e}")
+                            del data_H2
 
-            del data_varB, data_varC2
+                        del data_H1
+
+                    except Exception as e:
+                        print(f"Error processing H1 for simulation {i:03d}, H={ext_Hs:03d}: {e}")
+
+                del data_varB, data_varC2
 
         elif in_H2 in ('y', 'Y'):
             # J1 already exists on disk, load it
@@ -3002,41 +3516,41 @@ def process_simulation(args):
             data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"I1 for simulation {i:03d}")
             data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"I1 for simulation {i:03d}")
             if data_varB is None or data_varC2 is None:
-                return
+                print(f"Skipping I1 stage for simulation {i:03d}: missing B/C2 inputs; continuing with remaining stages")
+            else:
+                # Resolve graph file path from the simulation JSON
+                mesh_prefix = _mesh_prefix_for_sim(i)
 
-            # Resolve graph file path from the simulation JSON
-            mesh_prefix = _mesh_prefix_for_sim(i)
 
+                for ext_Is in range(I_ini, I_fin + 1):
 
-            for ext_Is in range(I_ini, I_fin + 1):
+                    try:
+                        graph_path = _mesh_artifact_path(mesh_prefix, "I", ext_Is, "gridhex.json")
 
-                try:
-                    graph_path = _mesh_artifact_path(mesh_prefix, "I", ext_Is, "gridhex.json")
+                        data_I1 = create_PKL_J1(
+                            data_varB, data_varC2, graph_path,
+                            sim_num=i,
+                        )
 
-                    data_I1 = create_PKL_J1(
-                        data_varB, data_varC2, graph_path,
-                        sim_num=i,
-                    )
-
-                    pickle_file = f'I001_Results/DATA_PICK_{i:03}_I1_{ext_Is:03d}.pkl'
-                    with open(pickle_file, 'wb') as f:
-                        pickle.dump(data_I1, f)
-
-                    if in_I2 in ('y', 'Y'):
-                        data_I2 = create_PKL_H2(data_I1, sim_num=i)
-
-                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_I2_{ext_Is:03d}.pkl'
+                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_I1_{ext_Is:03d}.pkl'
                         with open(pickle_file, 'wb') as f:
-                            pickle.dump(data_I2, f)
+                            pickle.dump(data_I1, f)
 
-                        del data_I2
+                        if in_I2 in ('y', 'Y'):
+                            data_I2 = create_PKL_H2(data_I1, sim_num=i)
 
-                    del data_I1
+                            pickle_file = f'I001_Results/DATA_PICK_{i:03}_I2_{ext_Is:03d}.pkl'
+                            with open(pickle_file, 'wb') as f:
+                                pickle.dump(data_I2, f)
 
-                except Exception as e:
-                    print(f"Error processing I1 for simulation {i:03d}, I={ext_Is:03d}: {e}")
+                            del data_I2
 
-            del data_varB, data_varC2
+                        del data_I1
+
+                    except Exception as e:
+                        print(f"Error processing I1 for simulation {i:03d}, I={ext_Is:03d}: {e}")
+
+                del data_varB, data_varC2
 
         elif in_I2 in ('y', 'Y'):
             # J1 already exists on disk, load it
@@ -3086,41 +3600,41 @@ def process_simulation(args):
             data_varB = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_B.pkl', f"K1 for simulation {i:03d}")
             data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"K1 for simulation {i:03d}")
             if data_varB is None or data_varC2 is None:
-                return
+                print(f"Skipping K1 stage for simulation {i:03d}: missing B/C2 inputs; continuing with remaining stages")
+            else:
+                # Resolve mesh prefix from the simulation JSON
+                mesh_prefix = _mesh_prefix_for_sim(i)
 
-            # Resolve mesh prefix from the simulation JSON
-            mesh_prefix = _mesh_prefix_for_sim(i)
+                for ext_Ks in range(K_ini, K_fin + 1):
 
-            for ext_Ks in range(K_ini, K_fin + 1):
+                    try:
+                        gridhex_path = _mesh_artifact_path(mesh_prefix, "K", ext_Ks, "gridhex.json")
 
-                try:
-                    gridhex_path = _mesh_artifact_path(mesh_prefix, "K", ext_Ks, "gridhex.json")
+                        data_K1 = create_PKL_K1(
+                            data_varB, data_varC2, gridhex_path,
+                            sim_num=i,
+                            create_bars_2=True,
+                        )
 
-                    data_K1 = create_PKL_K1(
-                        data_varB, data_varC2, gridhex_path,
-                        sim_num=i,
-                        create_bars_2=True,
-                    )
-
-                    pickle_file = f'I001_Results/DATA_PICK_{i:03}_K1_{ext_Ks:03d}.pkl'
-                    with open(pickle_file, 'wb') as f:
-                        pickle.dump(data_K1, f)
-
-                    if in_K2 in ('y', 'Y'):
-                        data_K2 = create_PKL_K2(data_K1, sim_num=i)
-
-                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_K2_{ext_Ks:03d}.pkl'
+                        pickle_file = f'I001_Results/DATA_PICK_{i:03}_K1_{ext_Ks:03d}.pkl'
                         with open(pickle_file, 'wb') as f:
-                            pickle.dump(data_K2, f)
+                            pickle.dump(data_K1, f)
 
-                        del data_K2
+                        if in_K2 in ('y', 'Y'):
+                            data_K2 = create_PKL_K2(data_K1, sim_num=i)
 
-                    del data_K1
+                            pickle_file = f'I001_Results/DATA_PICK_{i:03}_K2_{ext_Ks:03d}.pkl'
+                            with open(pickle_file, 'wb') as f:
+                                pickle.dump(data_K2, f)
 
-                except Exception as e:
-                    print(f"Error processing K1 for simulation {i:03d}, K={ext_Ks:03d}: {e}")
+                            del data_K2
 
-            del data_varB, data_varC2
+                        del data_K1
+
+                    except Exception as e:
+                        print(f"Error processing K1 for simulation {i:03d}, K={ext_Ks:03d}: {e}")
+
+                del data_varB, data_varC2
 
         elif in_K2 in ('y', 'Y'):
             # K1 already exists on disk, load it

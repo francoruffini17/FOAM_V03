@@ -205,6 +205,9 @@ def _get_stress_at_integration_points(
     Returns
     -------
     s11, s22, s21 : np.ndarray, each of shape (n_ips,)
+        For quads the values are returned in CIRCULAR natural-coordinate
+        order (-g,-g), (+g,-g), (+g,+g), (-g,+g) — the order expected by
+        :func:`_interpolate_at_natural_coords`.
     """
     ti = int(ti_key) - 1  # DATA_B uses 0-based time indices
     s21_key = 'S21' if 'S21' in DATA_B else 'S12'
@@ -215,11 +218,17 @@ def _get_stress_at_integration_points(
         s22 = np.array([DATA_B['S22'][element_key][0][ti]])
         s21 = np.array([DATA_B[s21_key][element_key][0][ti]])
     else:
-        # Quad (CPS4): 4 integration points
+        # Quad (CPS4): 4 integration points.
         # Stride of 2 accounts for section-point entries in the data layout.
-        s11 = np.array([DATA_B['S11'][element_key][ip * 2][ti] for ip in range(4)])
-        s22 = np.array([DATA_B['S22'][element_key][ip * 2][ti] for ip in range(4)])
-        s21 = np.array([DATA_B[s21_key][element_key][ip * 2][ti] for ip in range(4)])
+        # DATA_B rows follow ABAQUS integration-point numbering, which is
+        # grid order: IP1 (-g,-g), IP2 (+g,-g), IP3 (-g,+g), IP4 (+g,+g).
+        # Reorder to circular order (-,-), (+,-), (+,+), (-,+) so the values
+        # match the corner ordering assumed by _interpolate_at_natural_coords
+        # (ABAQUS IPs 1, 2, 4, 3 -> rows 0, 2, 6, 4).
+        ip_order = (0, 1, 3, 2)
+        s11 = np.array([DATA_B['S11'][element_key][ip * 2][ti] for ip in ip_order])
+        s22 = np.array([DATA_B['S22'][element_key][ip * 2][ti] for ip in ip_order])
+        s21 = np.array([DATA_B[s21_key][element_key][ip * 2][ti] for ip in ip_order])
 
     return s11, s22, s21
 

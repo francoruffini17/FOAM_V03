@@ -209,6 +209,7 @@ FH3001.dpi = 100
 FH3001.figsize = (4.75,4)
 FH3001.num_frames = num_frames
 FH3001.file_ext = 'H3_BFS_3001'
+FH3001.include_allnodes = True
 
 
 IT3001 = frame_animation_graph()
@@ -244,6 +245,7 @@ FI3001.dpi = 100
 FI3001.figsize = (4.75,4)
 FI3001.num_frames = num_frames
 FI3001.file_ext = 'I3_BFS_3001'
+FI3001.include_allnodes = True
 
 
 
@@ -306,6 +308,7 @@ FH3002.dpi = 100
 FH3002.figsize = (4.75,4)
 FH3002.num_frames = num_frames
 FH3002.file_ext = 'H3_BFS_3002'
+FH3002.include_allnodes = True
 
 
 IT3002 = frame_animation_graph()
@@ -341,6 +344,7 @@ FI3002.dpi = 100
 FI3002.figsize = (4.75,4)
 FI3002.num_frames = num_frames
 FI3002.file_ext = 'I3_BFS_3002'
+FI3002.include_allnodes = True
 
 
 
@@ -402,6 +406,7 @@ FH3003.dpi = 100
 FH3003.figsize = (4.75,4)
 FH3003.num_frames = num_frames
 FH3003.file_ext = 'H3_BFS_3003'
+FH3003.include_allnodes = True
 
 
 IT3003 = frame_animation_graph()
@@ -437,6 +442,7 @@ FI3003.dpi = 100
 FI3003.figsize = (4.75,4)
 FI3003.num_frames = num_frames
 FI3003.file_ext = 'I3_BFS_3003'
+FI3003.include_allnodes = True
 
 
 
@@ -474,6 +480,7 @@ FH3004.dpi = 100
 FH3004.figsize = (4.75,4)
 FH3004.num_frames = num_frames
 FH3004.file_ext = 'H3_BFS_3004'
+FH3004.include_allnodes = True
 
 
 IT3004 = frame_animation_graph()
@@ -509,6 +516,7 @@ FI3004.dpi = 100
 FI3004.figsize = (4.75,4)
 FI3004.num_frames = num_frames
 FI3004.file_ext = 'I3_BFS_3004'
+FI3004.include_allnodes = True
 
 
 
@@ -547,6 +555,7 @@ FH3005.dpi = 100
 FH3005.figsize = (4.75,4)
 FH3005.num_frames = num_frames
 FH3005.file_ext = 'H3_BFS_3005'
+FH3005.include_allnodes = True
 
 
 IT3005 = frame_animation_graph()
@@ -582,6 +591,7 @@ FI3005.dpi = 100
 FI3005.figsize = (4.75,4)
 FI3005.num_frames = num_frames
 FI3005.file_ext = 'I3_BFS_3005'
+FI3005.include_allnodes = True
 
 
 FFH3001 = graph_property()

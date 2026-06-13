@@ -8,6 +8,7 @@ from A001_functions.Triangulation_creator import (
     plot_triangulation,
     preview_triangulation_with_mesh,
     triangulation_generator,
+    quadrangulation_generator,
 )
 from A001_functions.Hex_5 import (
     MeshConfig,
@@ -28,33 +29,38 @@ vals = [5, 10, 20, 40, 80, 160]
 for val in vals:
     mesh_path = f"C001_Mesh_files/A030_{val:03d}k.mesh.json"
     for i in range(5):
-        create_grid_file(
-            mesh_path,
-            f"C001_Mesh_files/A030_{val:03d}k_H300{i+1}.grid.json",
-            grid_n=int(floor(40*(1.5**i))),
-            grid_m=int(floor(40*(1.5**i))),
-            grid_remove_edge_nodes=True,
-            show_plot=False,
-            overlay_mesh=True,
-            boundary_only=True,
-        )
+        # create_grid_file(
+        #     mesh_path,
+        #     f"C001_Mesh_files/A030_{val:03d}k_H300{i+1}.grid.json",
+        #     grid_n=int(floor(40*(1.5**i))),
+        #     grid_m=int(floor(40*(1.5**i))),
+        #     grid_remove_edge_nodes=True,
+        #     show_plot=False,
+        #     overlay_mesh=True,
+        #     boundary_only=True,
+        # )
 
 
-        create_gridhex_file(
-            mesh_path,
-            f"C001_Mesh_files/A030_{val:03d}k_I300{i+1}.gridhex.json",
-            hexagon_size=1 / int(floor(40*(1.5**i))),
-            grid_remove_edge_nodes=True,
-            gridhex_pointy_top=False,
-            delete_gridhex_isolated_bars=True,
-            show_plot=False,
-            overlay_mesh=True,
-            boundary_only=True,
-        )
+        # create_gridhex_file(
+        #     mesh_path,
+        #     f"C001_Mesh_files/A030_{val:03d}k_I300{i+1}.gridhex.json",
+        #     hexagon_size=1 / int(floor(40*(1.5**i))),
+        #     grid_remove_edge_nodes=True,
+        #     gridhex_pointy_top=False,
+        #     delete_gridhex_isolated_bars=True,
+        #     show_plot=False,
+        #     overlay_mesh=True,
+        #     boundary_only=True,
+        # )
 
         triangulation_generator(
-            n_nodes_per_edge=int(floor(10*(1.5**i))),
+            n_nodes_per_edge=int(floor(10*(1.3**i))),
             file_name=f"C001_Mesh_files/A030_{val:03d}k_T00{i+1}.tri",
+        )
+
+        quadrangulation_generator(
+            n_nodes_per_edge=int(floor(10*(1.3**i))),
+            file_name=f"C001_Mesh_files/A030_{val:03d}k_Q00{i+1}.quad",
         )
 
         # plot_triangulation(

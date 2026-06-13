@@ -460,6 +460,282 @@ def plot_triangulation(
 
 
 # ---------------------------------------------------------------------------
+# Quadrangulation (Q elements, 1 quad per grid cell)
+# ---------------------------------------------------------------------------
+
+def quadrangulation_generator(n_nodes_per_edge: int, file_name: str) -> None:
+    """
+    Generate a quadrilateral FEM mesh on the unit square [0,1]x[0,1].
+
+    One quad per grid cell using the 4 corner nodes in CCW order:
+    BL (n1), BR (n2), TR (n3), TL (n4).  All nodes carry ID 1.
+
+    Parameters
+    ----------
+    n_nodes_per_edge : int
+        Number of nodes along each edge (≥ 2).
+    file_name : str
+        Path where the .quad file will be saved.
+    """
+    if n_nodes_per_edge < 2:
+        raise ValueError("n_nodes_per_edge must be >= 2")
+
+    n = n_nodes_per_edge
+    n_cells = (n - 1) ** 2
+
+    # 1. Build ID-1 nodes (n x n grid, row-major)
+    coords = []
+    node_id1 = {}
+
+    for row in range(n):
+        for col in range(n):
+            x = col / (n - 1)
+            y = row / (n - 1)
+            idx = len(coords)
+            node_id1[(row, col)] = idx
+            coords.append((x, y, 1))
+
+    # 2. Build elements (1 CCW quad per cell: BL, BR, TR, TL)
+    elements = []
+    for row in range(n - 1):
+        for col in range(n - 1):
+            BL = node_id1[(row,     col    )]
+            BR = node_id1[(row,     col + 1)]
+            TR = node_id1[(row + 1, col + 1)]
+            TL = node_id1[(row + 1, col    )]
+            elements.append((BL, BR, TR, TL))
+
+    # 3. Write file
+    n_nodes = len(coords)
+    n_elements = len(elements)
+
+    with open(file_name, "w") as f:
+        f.write(f"{n_nodes}\n")
+        for x, y, nid in coords:
+            f.write(f"{x:.10f}, {y:.10f}, {nid}\n")
+        f.write(f"{n_elements}\n")
+        for n1, n2, n3, n4 in elements:
+            f.write(f"{n1}, {n2}, {n3}, {n4}\n")
+
+    print(f"Mesh saved to '{file_name}'")
+    print(f"  ID-1 nodes : {n * n}")
+    print(f"  Elements   : {n_cells}")
+
+
+def read_quadrangulation_file(file_name: str):
+    """
+    Read a .quad file produced by quadrangulation_generator.
+
+    Returns
+    -------
+    nodes : list[tuple[float, float, int]]
+        Node data as (x, y, ID).
+    elements : list[tuple[int, int, int, int]]
+        Quad connectivity with 0-based node indices: (BL, BR, TR, TL).
+    """
+    nodes = []
+    elements = []
+
+    with open(file_name, "r") as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    i = 0
+    n_nodes_total = int(lines[i]); i += 1
+    for _ in range(n_nodes_total):
+        parts = lines[i].replace(",", " ").split(); i += 1
+        nodes.append((float(parts[0]), float(parts[1]), int(parts[2])))
+
+    n_elements_total = int(lines[i]); i += 1
+    for _ in range(n_elements_total):
+        parts = lines[i].replace(",", " ").split(); i += 1
+        elements.append((int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])))
+
+    return nodes, elements
+
+
+def preview_quadrangulation_with_mesh(
+    mesh_file: str,
+    quadrangulation_file: str,
+    *,
+    snap_to_mesh_nodes: bool = True,
+    show_original_quadrangulation: bool = True,
+    show_mesh_nodes: bool = True,
+    show_quadrangulation_nodes: bool = False,
+    show_node_numbers: bool = False,
+    show_element_numbers: bool = False,
+    mesh_boundary_only: bool = False,
+    figsize: tuple = (8, 8),
+    ax=None,
+    show: bool = True,
+) -> plt.Figure:
+    """
+    Preview a quadrangulation mesh over a finite-element ``*.mesh.json`` file.
+
+    When ``snap_to_mesh_nodes=True`` the quad vertices are moved to their
+    nearest FEM mesh nodes before plotting.
+    """
+    from scipy.spatial import cKDTree
+    from A001_functions.Hex_5 import read_mesh_json
+
+    mesh_nodes_raw, mesh_elements = read_mesh_json(mesh_file)
+    mesh_coords = np.array([(x, y) for x, y, _ in mesh_nodes_raw], dtype=float)
+
+    quad_nodes, quad_elements = read_quadrangulation_file(quadrangulation_file)
+    quad_coords_original = np.array([(x, y) for x, y, _ in quad_nodes], dtype=float)
+    if snap_to_mesh_nodes:
+        _, matched_indices = cKDTree(mesh_coords).query(quad_coords_original, k=1)
+        matched_indices = np.asarray(matched_indices, dtype=int)
+        quad_coords = mesh_coords[matched_indices]
+    else:
+        quad_coords = quad_coords_original
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.get_figure()
+
+    if mesh_elements:
+        if mesh_boundary_only:
+            boundary = _boundary_segments(mesh_coords, mesh_elements)
+            if boundary:
+                ax.add_collection(LineCollection(
+                    boundary, colors="0.35", linewidths=1.0, zorder=1,
+                ))
+        else:
+            ax.add_collection(PolyCollection(
+                [mesh_coords[element] for element in mesh_elements],
+                facecolors="#d7e8f7", edgecolors="#6f7f8f",
+                linewidths=0.45, alpha=0.35, zorder=1,
+            ))
+
+    if show_mesh_nodes:
+        ax.scatter(mesh_coords[:, 0], mesh_coords[:, 1],
+                   s=6, c="black", alpha=0.65, linewidths=0, zorder=4, label="FEM nodes")
+
+    if snap_to_mesh_nodes and show_original_quadrangulation:
+        orig_segs = _element_segments(quad_coords_original, quad_elements)
+        ax.add_collection(LineCollection(
+            orig_segs, colors="#9aa5b1", linewidths=0.45,
+            linestyles="dotted", alpha=0.7, zorder=2,
+        ))
+
+    quad_segs = _element_segments(quad_coords, quad_elements)
+    ax.add_collection(LineCollection(
+        quad_segs, colors="#d62728", linewidths=0.9, alpha=0.95, zorder=3,
+    ))
+
+    if show_quadrangulation_nodes:
+        ax.scatter(quad_coords[:, 0], quad_coords[:, 1],
+                   c="#1a1a2e", s=18, edgecolors="white", linewidths=0.25, zorder=5)
+
+    if show_node_numbers:
+        for idx, (x, y) in enumerate(quad_coords):
+            ax.annotate(str(idx), xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points", fontsize=6,
+                        color="#c0392b", zorder=6)
+
+    if show_element_numbers:
+        for elem_idx, (n1, n2, n3, n4) in enumerate(quad_elements):
+            centroid = (quad_coords[n1] + quad_coords[n2] +
+                        quad_coords[n3] + quad_coords[n4]) / 4.0
+            ax.text(centroid[0], centroid[1], str(elem_idx),
+                    ha="center", va="center", fontsize=5,
+                    color="#8e44ad", zorder=6)
+
+    all_coords = [mesh_coords, quad_coords]
+    if snap_to_mesh_nodes and show_original_quadrangulation:
+        all_coords.append(quad_coords_original)
+    all_coords = np.vstack(all_coords)
+    x_min, y_min = all_coords.min(axis=0)
+    x_max, y_max = all_coords.max(axis=0)
+    span = max(x_max - x_min, y_max - y_min)
+    pad = 0.05 * span if span > 0 else 0.05
+
+    ax.set_xlim(x_min - pad, x_max + pad)
+    ax.set_ylim(y_min - pad, y_max + pad)
+    ax.set_aspect("equal")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    mode = "snapped to FEM nodes" if snap_to_mesh_nodes else "original"
+    ax.set_title(
+        f"Quadrangulation preview ({mode})\n"
+        f"{len(mesh_coords)} FEM nodes, {len(quad_nodes)} quad nodes, "
+        f"{len(quad_elements)} quads"
+    )
+
+    legend_handles = [
+        mpatches.Patch(facecolor="#d7e8f7", edgecolor="#6f7f8f", alpha=0.35, label="FEM mesh"),
+        mlines.Line2D([], [], color="#d62728", linewidth=0.9, label="Quadrangulation"),
+    ]
+    if snap_to_mesh_nodes and show_original_quadrangulation:
+        legend_handles.append(mlines.Line2D(
+            [], [], color="#9aa5b1", linewidth=0.45,
+            linestyle="dotted", label="Original quadrangulation",
+        ))
+    ax.legend(handles=legend_handles, loc="upper right", fontsize=8)
+
+    fig.tight_layout()
+    if show:
+        plt.show()
+    return fig
+
+
+def plot_quadrangulation(
+    file_name: str,
+    show_node_numbers: bool = False,
+    show_element_numbers: bool = False,
+    ax=None,
+) -> plt.Figure:
+    """
+    Read a .quad file produced by quadrangulation_generator and plot it.
+    """
+    nodes, elements = read_quadrangulation_file(file_name)
+
+    xs  = np.array([n[0] for n in nodes])
+    ys  = np.array([n[1] for n in nodes])
+    quads = np.array(elements, dtype=int)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 7))
+    else:
+        fig = ax.get_figure()
+
+    ax.set_aspect("equal")
+    ax.set_title("FEM Quadrangulation", fontsize=14, fontweight="bold", pad=14)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    # Draw quad edges
+    segments = _element_segments(list(zip(xs, ys)), quads)
+    ax.add_collection(LineCollection(segments, colors="#4a90d9", linewidths=0.8, alpha=0.85))
+
+    ax.scatter(xs, ys, c="#1a1a2e", s=30, zorder=5,
+               label="ID 1 (grid nodes)", edgecolors="white", linewidths=0.4)
+
+    if show_node_numbers:
+        for i, (x, y, _) in enumerate(nodes):
+            ax.annotate(str(i), xy=(x, y), xytext=(3, 3),
+                        textcoords="offset points", fontsize=6,
+                        color="#1a1a2e", zorder=6)
+
+    if show_element_numbers:
+        for e_idx, (n1, n2, n3, n4) in enumerate(elements):
+            cx = (xs[n1] + xs[n2] + xs[n3] + xs[n4]) / 4
+            cy = (ys[n1] + ys[n2] + ys[n3] + ys[n4]) / 4
+            ax.text(cx, cy, str(e_idx), ha="center", va="center",
+                    fontsize=5, color="#c0392b", zorder=6)
+
+    ax.legend(loc="upper left", fontsize=9, framealpha=0.9)
+    ax.set_xlim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)
+    ax.autoscale_view()
+    fig.tight_layout()
+    plt.show()
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Quick demo
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
