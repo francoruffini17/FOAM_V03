@@ -1260,7 +1260,7 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
 
     # Parameter sets for the strain energy w: (K, G, m, n)
     if w_param_sets is None:
-        w_param_sets = [(1, 1, 1, 1)]
+        w_param_sets = [(1, 1, 1, 1), (1, 1, 2, 2)]
     _w_param_sets = w_param_sets
     w  = {params: {} for params in _w_param_sets}
     I2 = np.eye(2)  # 2x2 identity used in w computation
@@ -1780,7 +1780,7 @@ def create_PKL_Q2(DATA_Q1: dict, output_path: str = None, sim_num: int = None,
     C_iso      = {}
 
     if w_param_sets is None:
-        w_param_sets = [(1, 1, 1, 1)]
+        w_param_sets = [(1, 1, 1, 1), (1, 1, 2, 2)]
     _w_param_sets = w_param_sets
     w  = {params: {} for params in _w_param_sets}
     I2 = np.eye(2)
@@ -3185,7 +3185,7 @@ def process_simulation(args):
     """Processes a single simulation based on input arguments."""
 
     try:
-        i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, delete_csv, n_workers, max_memory_gb = args
+        i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, delete_csv, n_workers, max_memory_gb = args
         
         csv_file = f'I001_Results/RES_SIM_{i:03}.csv'
 
@@ -3680,6 +3680,60 @@ def process_simulation(args):
 
 
 
+        if in_Q1 in ('y', 'Y'):
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"Q1 for simulation {i:03d}")
+            if data_varC2 is None:
+                print(f"Skipping Q1 stage for simulation {i:03d}: missing C2 input; continuing with remaining stages")
+            else:
+                mesh_prefix = _mesh_prefix_for_sim(i)
+
+                for ext_Qs in range(Q_ini, Q_fin + 1):
+                    try:
+                        quad_file = _mesh_artifact_path(mesh_prefix, "Q", ext_Qs, "quad")
+
+                        data_Q1 = create_PKL_Q1(
+                            data_varC2, quad_file,
+                            sim_num=i,
+                            output_path=f'I001_Results/DATA_PICK_{i:03}_Q1_{ext_Qs:03d}.pkl',
+                        )
+
+                        if in_Q2 in ('y', 'Y'):
+                            try:
+                                data_Q2 = create_PKL_Q2(
+                                    data_Q1,
+                                    sim_num=i,
+                                    output_path=f'I001_Results/DATA_PICK_{i:03d}_Q2_{ext_Qs:03d}.pkl',
+                                    w_param_sets=[(1, 1, 1, 1), (1, 1, 2, 2)],
+                                )
+                                del data_Q2
+                            except Exception as e:
+                                print(f"Error processing Q2 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
+
+                        del data_Q1
+                    except Exception as e:
+                        print(f"Error processing Q1 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
+
+                del data_varC2
+
+        elif in_Q2 in ('y', 'Y'):
+            # Q1 already exists on disk, load it and compute Q2
+            for ext_Qs in range(Q_ini, Q_fin + 1):
+                try:
+                    q1_path = f'I001_Results/DATA_PICK_{i:03}_Q1_{ext_Qs:03d}.pkl'
+                    data_Q1 = _load_pickle_or_skip(q1_path, f"Q2 for simulation {i:03d}, Q={ext_Qs:03d}")
+                    if data_Q1 is None:
+                        continue
+                    data_Q2 = create_PKL_Q2(
+                        data_Q1,
+                        sim_num=i,
+                        output_path=f'I001_Results/DATA_PICK_{i:03d}_Q2_{ext_Qs:03d}.pkl',
+                        w_param_sets=[(1, 1, 1, 1), (1, 1, 2, 2)],
+                    )
+                    del data_Q1, data_Q2
+                except Exception as e:
+                    print(f"Error processing Q2 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
+
+
         if delete_csv in ('y','Y'):
             if os.path.exists(csv_file):
                 os.remove(csv_file)
@@ -3728,6 +3782,10 @@ if __name__ == "__main__":
     K_ini = input('Initial K? (y/n): ') or '0'
     K_fin = input('Final K? (y/n): ') or '0'
     K_alg = input('Algorithm for K3? (1=default, 2=BFS, default=1): ') or '1'
+    in_Q1 = input('Output file Q1? (y/n): ') or 'n'
+    in_Q2 = input('Output file Q2? (y/n): ') or 'n'
+    Q_ini = input('Initial Q index: ') or '0'
+    Q_fin = input('Final Q index: ') or '0'
     delete_csv = input('Delete csv? (y/n): ') or 'n'
     n_workers_str = input('Number of parallel workers for G2_exact (default=auto): ') or '0'
     max_memory_gb_str = input('Max memory in GB for G2_exact (default=auto): ') or '0'
@@ -3743,6 +3801,8 @@ if __name__ == "__main__":
     I_fin = int(I_fin)
     K_ini = int(K_ini)
     K_fin = int(K_fin)
+    Q_ini = int(Q_ini)
+    Q_fin = int(Q_fin)
 
     J_alg = None if J_alg == '1' else 'bfs'
     H_alg = None if H_alg == '1' else 'bfs'
@@ -3750,7 +3810,7 @@ if __name__ == "__main__":
     K_alg = None if K_alg == '1' else 'bfs'
 
     # Prepare arguments for multiprocessing
-    args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
+    args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
 
     # Use multiprocessing to process simulations in parallel
     with multiprocessing.Pool() as pool:

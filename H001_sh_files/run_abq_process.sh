@@ -58,6 +58,7 @@ Reduce results output options (defaults shown):
   H1=y H2=y H3=y H_ini=0 H_fin=0 H_alg=1
   I1=y I2=y I3=y I_ini=0 I_fin=0 I_alg=1
   K1=y K2=y K3=y K_ini=0 K_fin=0 K_alg=1
+  Q1=n Q2=n Q_ini=0 Q_fin=0
   DELETE_CSV=n  N_WORKERS=1  MAX_MEMORY_GB=10
 
 Video options:
@@ -135,6 +136,10 @@ declare -A OUTPUT_OPTIONS=(
     ["K_ini"]="0"
     ["K_fin"]="0"
     ["K_alg"]="1"
+    ["Q1"]="n"
+    ["Q2"]="n"
+    ["Q_ini"]="0"
+    ["Q_fin"]="0"
     ["DELETE_CSV"]="n"
     ["N_WORKERS"]="1"
     ["MAX_MEMORY_GB"]="10"
@@ -274,7 +279,7 @@ run_reduce() {
     {
         printf "%s\n%s\n" "$sim_number" "$sim_number"
 
-        for key in A A2 B C C2 D T1 T2 T1_ini T1_fin J1 J2 J3 J_ini J_fin J_alg H1 H2 H3 H_ini H_fin H_alg I1 I2 I3 I_ini I_fin I_alg K1 K2 K3 K_ini K_fin K_alg DELETE_CSV N_WORKERS MAX_MEMORY_GB; do
+        for key in A A2 B C C2 D T1 T2 T1_ini T1_fin J1 J2 J3 J_ini J_fin J_alg H1 H2 H3 H_ini H_fin H_alg I1 I2 I3 I_ini I_fin I_alg K1 K2 K3 K_ini K_fin K_alg Q1 Q2 Q_ini Q_fin DELETE_CSV N_WORKERS MAX_MEMORY_GB; do
             printf "%s\n" "${OUTPUT_OPTIONS[$key]}"
         done
     } > "$reduce_input_file"

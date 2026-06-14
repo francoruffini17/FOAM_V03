@@ -122,7 +122,7 @@ VQ001.num_frames = num_frames
 VQ001.dpi = 300
 VQ001.Q1_ext = '001'
 VQ001.Q2_ext = '001'
-VQ001.plot_Q1_params.color_by = ('w', (1, 1, 2, 2))
+VQ001.plot_Q1_params.color_by = 'area'
 
 VQ002 = frame_animation_Q1()
 VQ002.title = ''
@@ -130,7 +130,7 @@ VQ002.num_frames = num_frames
 VQ002.dpi = 300
 VQ002.Q1_ext = '002'
 VQ002.Q2_ext = '002'
-VQ002.plot_Q1_params.color_by = ('w', (1, 1, 2, 2))
+VQ002.plot_Q1_params.color_by = 'area'
 
 VQ003 = frame_animation_Q1()
 VQ003.title = ''
@@ -138,7 +138,23 @@ VQ003.num_frames = num_frames
 VQ003.dpi = 300
 VQ003.Q1_ext = '003'
 VQ003.Q2_ext = '003'
-VQ003.plot_Q1_params.color_by = ('w', (1, 1, 2, 2))
+VQ003.plot_Q1_params.color_by = 'area'
+
+VQ004 = frame_animation_Q1()
+VQ004.title = ''
+VQ004.num_frames = num_frames
+VQ004.dpi = 300
+VQ004.Q1_ext = '004'
+VQ004.Q2_ext = '004'
+VQ004.plot_Q1_params.color_by = 'area'
+
+VQ005 = frame_animation_Q1()
+VQ005.title = ''
+VQ005.num_frames = num_frames
+VQ005.dpi = 300
+VQ005.Q1_ext = '005'
+VQ005.Q2_ext = '005'
+VQ005.plot_Q1_params.color_by = 'area'
 
 
 Q001 = frame_variable()
@@ -204,6 +220,48 @@ Q003.file_key_x = 'A2'
 Q003.yscale = 'linear'
 
 
+Q004 = frame_variable()
+Q004.x_key_path = "['U2']['PERN-9999997']"
+Q004.y_key_paths = ["['w_cv_area_weighted'][(1,1,2,2)]"]
+Q004.normalize_x = -1
+Q004.legends = ['w cv area-weighted']
+Q004.normalized_by = 1
+Q004.invert_y = False
+Q004.xlabel = "Displacement [mm]"
+Q004.ylabel = "w CV area-weighted"
+Q004.title = None
+Q004.derivative = False
+Q004.save_path = 'frames_A/'
+Q004.figsize = (4.75,4)
+Q004.dpi = 100
+Q004.num_frames = num_frames
+Q004.plot_from_0 = False
+Q004.file_key_y = 'Q2_004'
+Q004.file_key_x = 'A2'
+Q004.yscale = 'linear'
+
+
+Q005 = frame_variable()
+Q005.x_key_path = "['U2']['PERN-9999997']"
+Q005.y_key_paths = ["['w_cv_area_weighted'][(1,1,2,2)]"]
+Q005.normalize_x = -1
+Q005.legends = ['w cv area-weighted']
+Q005.normalized_by = 1
+Q005.invert_y = False
+Q005.xlabel = "Displacement [mm]"
+Q005.ylabel = "w CV area-weighted"
+Q005.title = None
+Q005.derivative = False
+Q005.save_path = 'frames_A/'
+Q005.figsize = (4.75,4)
+Q005.dpi = 100
+Q005.num_frames = num_frames
+Q005.plot_from_0 = False
+Q005.file_key_y = 'Q2_005'
+Q005.file_key_x = 'A2'
+Q005.yscale = 'linear'
+
+
 # ── Q2 variable helpers ───────────────────────────────────────────────────────
 def _make_q2_var(file_key_y, key_path, ylabel, save_path):
     obj = frame_variable()
@@ -230,42 +288,60 @@ def _make_q2_var(file_key_y, key_path, ylabel, save_path):
 Q001_wcv     = _make_q2_var('Q2_001', "['w_cv'][(1,1,2,2)]",                'w CV',                  'frames_Q001_wcv/')
 Q002_wcv     = _make_q2_var('Q2_002', "['w_cv'][(1,1,2,2)]",                'w CV',                  'frames_Q002_wcv/')
 Q003_wcv     = _make_q2_var('Q2_003', "['w_cv'][(1,1,2,2)]",                'w CV',                  'frames_Q003_wcv/')
+Q004_wcv     = _make_q2_var('Q2_004', "['w_cv'][(1,1,2,2)]",                'w CV',                  'frames_Q004_wcv/')
+Q005_wcv     = _make_q2_var('Q2_005', "['w_cv'][(1,1,2,2)]",                'w CV',                  'frames_Q005_wcv/')
 
 Q001_wstd    = _make_q2_var('Q2_001', "['w_std'][(1,1,2,2)]",               'w std',                 'frames_Q001_wstd/')
 Q002_wstd    = _make_q2_var('Q2_002', "['w_std'][(1,1,2,2)]",               'w std',                 'frames_Q002_wstd/')
 Q003_wstd    = _make_q2_var('Q2_003', "['w_std'][(1,1,2,2)]",               'w std',                 'frames_Q003_wstd/')
+Q004_wstd    = _make_q2_var('Q2_004', "['w_std'][(1,1,2,2)]",               'w std',                 'frames_Q004_wstd/')
+Q005_wstd    = _make_q2_var('Q2_005', "['w_std'][(1,1,2,2)]",               'w std',                 'frames_Q005_wstd/')
 
 Q001_wstd_aw = _make_q2_var('Q2_001', "['w_std_area_weighted'][(1,1,2,2)]", 'w std area-weighted',   'frames_Q001_wstd_aw/')
 Q002_wstd_aw = _make_q2_var('Q2_002', "['w_std_area_weighted'][(1,1,2,2)]", 'w std area-weighted',   'frames_Q002_wstd_aw/')
 Q003_wstd_aw = _make_q2_var('Q2_003', "['w_std_area_weighted'][(1,1,2,2)]", 'w std area-weighted',   'frames_Q003_wstd_aw/')
+Q004_wstd_aw = _make_q2_var('Q2_004', "['w_std_area_weighted'][(1,1,2,2)]", 'w std area-weighted',   'frames_Q004_wstd_aw/')
+Q005_wstd_aw = _make_q2_var('Q2_005', "['w_std_area_weighted'][(1,1,2,2)]", 'w std area-weighted',   'frames_Q005_wstd_aw/')
 
 Q001_wmean   = _make_q2_var('Q2_001', "['w_mean'][(1,1,2,2)]",              'w mean',                'frames_Q001_wmean/')
 Q002_wmean   = _make_q2_var('Q2_002', "['w_mean'][(1,1,2,2)]",              'w mean',                'frames_Q002_wmean/')
 Q003_wmean   = _make_q2_var('Q2_003', "['w_mean'][(1,1,2,2)]",              'w mean',                'frames_Q003_wmean/')
+Q004_wmean   = _make_q2_var('Q2_004', "['w_mean'][(1,1,2,2)]",              'w mean',                'frames_Q004_wmean/')
+Q005_wmean   = _make_q2_var('Q2_005', "['w_mean'][(1,1,2,2)]",              'w mean',                'frames_Q005_wmean/')
 
 Q001_W       = _make_q2_var('Q2_001', "['W'][(1,1,2,2)]",                   'W (total energy)',      'frames_Q001_W/')
 Q002_W       = _make_q2_var('Q2_002', "['W'][(1,1,2,2)]",                   'W (total energy)',      'frames_Q002_W/')
 Q003_W       = _make_q2_var('Q2_003', "['W'][(1,1,2,2)]",                   'W (total energy)',      'frames_Q003_W/')
+Q004_W       = _make_q2_var('Q2_004', "['W'][(1,1,2,2)]",                   'W (total energy)',      'frames_Q004_W/')
+Q005_W       = _make_q2_var('Q2_005', "['W'][(1,1,2,2)]",                   'W (total energy)',      'frames_Q005_W/')
 
 Q001_eta     = _make_q2_var('Q2_001', "['eta']",                             'eta (mesh regularity)', 'frames_Q001_eta/')
 Q002_eta     = _make_q2_var('Q2_002', "['eta']",                             'eta (mesh regularity)', 'frames_Q002_eta/')
 Q003_eta     = _make_q2_var('Q2_003', "['eta']",                             'eta (mesh regularity)', 'frames_Q003_eta/')
+Q004_eta     = _make_q2_var('Q2_004', "['eta']",                             'eta (mesh regularity)', 'frames_Q004_eta/')
+Q005_eta     = _make_q2_var('Q2_005', "['eta']",                             'eta (mesh regularity)', 'frames_Q005_eta/')
 
 Q001_shear_mean = _make_q2_var('Q2_001', "['shear_mean']",                  'shear mean',            'frames_Q001_shear_mean/')
 Q002_shear_mean = _make_q2_var('Q2_002', "['shear_mean']",                  'shear mean',            'frames_Q002_shear_mean/')
 Q003_shear_mean = _make_q2_var('Q2_003', "['shear_mean']",                  'shear mean',            'frames_Q003_shear_mean/')
+Q004_shear_mean = _make_q2_var('Q2_004', "['shear_mean']",                  'shear mean',            'frames_Q004_shear_mean/')
+Q005_shear_mean = _make_q2_var('Q2_005', "['shear_mean']",                  'shear mean',            'frames_Q005_shear_mean/')
 
 Q001_gle_mean   = _make_q2_var('Q2_001', "['gle_mean']",                    'GLE mean',              'frames_Q001_gle_mean/')
 Q002_gle_mean   = _make_q2_var('Q2_002', "['gle_mean']",                    'GLE mean',              'frames_Q002_gle_mean/')
 Q003_gle_mean   = _make_q2_var('Q2_003', "['gle_mean']",                    'GLE mean',              'frames_Q003_gle_mean/')
+Q004_gle_mean   = _make_q2_var('Q2_004', "['gle_mean']",                    'GLE mean',              'frames_Q004_gle_mean/')
+Q005_gle_mean   = _make_q2_var('Q2_005', "['gle_mean']",                    'GLE mean',              'frames_Q005_gle_mean/')
 
 Q001_edi_mean   = _make_q2_var('Q2_001', "['edi_mean']",                    'EDI mean',              'frames_Q001_edi_mean/')
 Q002_edi_mean   = _make_q2_var('Q2_002', "['edi_mean']",                    'EDI mean',              'frames_Q002_edi_mean/')
 Q003_edi_mean   = _make_q2_var('Q2_003', "['edi_mean']",                    'EDI mean',              'frames_Q003_edi_mean/')
+Q004_edi_mean   = _make_q2_var('Q2_004', "['edi_mean']",                    'EDI mean',              'frames_Q004_edi_mean/')
+Q005_edi_mean   = _make_q2_var('Q2_005', "['edi_mean']",                    'EDI mean',              'frames_Q005_edi_mean/')
 
 
 T = frames_combination()
-T.canvas_size = (3500, 6200)
+T.canvas_size = (3600, 6200)
 T.title = "Deformation {-DATA['U2']['PERN-9999997'][ti]:0.2f} mm | E = {DATA_J['E']} MPa | Pi = {DATA_J['steps'][0]['Pressure_BC']} MPa | Porosity = {porosity}"
 T.title_position = (1000, 10)
 T.title_font = '/home/fruffini/.conda/envs/Fenv/lib/python3.11/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf'
@@ -385,6 +461,46 @@ T.elements = [
         "object": Q003,
         "replace_frames": False,
     },
+    {
+        "position": (2400, 100),
+        "size": (500, 500),
+        "path": "frames_VQ004/",
+        "subtitle": "Edge index",
+        "create_frames": True,
+        "type": 'Q1A',
+        "object": VQ004,
+        "replace_frames": False,
+    },
+    {
+        "position": (2400, 650),
+        "size": (500, 500),
+        "path": "frames_Q004/",
+        "subtitle": "Energy density variability",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 100),
+        "size": (500, 500),
+        "path": "frames_VQ005/",
+        "subtitle": "Edge index",
+        "create_frames": True,
+        "type": 'Q1A',
+        "object": VQ005,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 650),
+        "size": (500, 500),
+        "path": "frames_Q005/",
+        "subtitle": "Energy density variability",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005,
+        "replace_frames": False,
+    },
     # ── w_cv ──────────────────────────────────────────────────────────────
     {
         "position": (600, 1200),
@@ -414,6 +530,26 @@ T.elements = [
         "create_frames": True,
         "type": 'V',
         "object": Q003_wcv,
+        "replace_frames": False,
+    },
+    {
+        "position": (2400, 1200),
+        "size": (500, 500),
+        "path": "frames_Q004_wcv/",
+        "subtitle": "w CV",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_wcv,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 1200),
+        "size": (500, 500),
+        "path": "frames_Q005_wcv/",
+        "subtitle": "w CV",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_wcv,
         "replace_frames": False,
     },
     # ── w_std ─────────────────────────────────────────────────────────────
@@ -447,6 +583,26 @@ T.elements = [
         "object": Q003_wstd,
         "replace_frames": False,
     },
+    {
+        "position": (2400, 1750),
+        "size": (500, 500),
+        "path": "frames_Q004_wstd/",
+        "subtitle": "w std",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_wstd,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 1750),
+        "size": (500, 500),
+        "path": "frames_Q005_wstd/",
+        "subtitle": "w std",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_wstd,
+        "replace_frames": False,
+    },
     # ── w_std_area_weighted ───────────────────────────────────────────────
     {
         "position": (600, 2300),
@@ -476,6 +632,26 @@ T.elements = [
         "create_frames": True,
         "type": 'V',
         "object": Q003_wstd_aw,
+        "replace_frames": False,
+    },
+    {
+        "position": (2400, 2300),
+        "size": (500, 500),
+        "path": "frames_Q004_wstd_aw/",
+        "subtitle": "w std area-weighted",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_wstd_aw,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 2300),
+        "size": (500, 500),
+        "path": "frames_Q005_wstd_aw/",
+        "subtitle": "w std area-weighted",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_wstd_aw,
         "replace_frames": False,
     },
     # ── w_mean ────────────────────────────────────────────────────────────
@@ -509,6 +685,26 @@ T.elements = [
         "object": Q003_wmean,
         "replace_frames": False,
     },
+    {
+        "position": (2400, 2850),
+        "size": (500, 500),
+        "path": "frames_Q004_wmean/",
+        "subtitle": "w mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_wmean,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 2850),
+        "size": (500, 500),
+        "path": "frames_Q005_wmean/",
+        "subtitle": "w mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_wmean,
+        "replace_frames": False,
+    },
     # ── W (total area-weighted energy) ────────────────────────────────────
     {
         "position": (600, 3400),
@@ -538,6 +734,26 @@ T.elements = [
         "create_frames": True,
         "type": 'V',
         "object": Q003_W,
+        "replace_frames": False,
+    },
+    {
+        "position": (2400, 3400),
+        "size": (500, 500),
+        "path": "frames_Q004_W/",
+        "subtitle": "W (total energy)",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_W,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 3400),
+        "size": (500, 500),
+        "path": "frames_Q005_W/",
+        "subtitle": "W (total energy)",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_W,
         "replace_frames": False,
     },
     # ── eta (mesh regularity) ─────────────────────────────────────────────
@@ -571,6 +787,26 @@ T.elements = [
         "object": Q003_eta,
         "replace_frames": False,
     },
+    {
+        "position": (2400, 3950),
+        "size": (500, 500),
+        "path": "frames_Q004_eta/",
+        "subtitle": "eta (mesh regularity)",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_eta,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 3950),
+        "size": (500, 500),
+        "path": "frames_Q005_eta/",
+        "subtitle": "eta (mesh regularity)",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_eta,
+        "replace_frames": False,
+    },
     # ── shear_mean ────────────────────────────────────────────────────────
     {
         "position": (600, 4500),
@@ -600,6 +836,26 @@ T.elements = [
         "create_frames": True,
         "type": 'V',
         "object": Q003_shear_mean,
+        "replace_frames": False,
+    },
+    {
+        "position": (2400, 4500),
+        "size": (500, 500),
+        "path": "frames_Q004_shear_mean/",
+        "subtitle": "shear mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_shear_mean,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 4500),
+        "size": (500, 500),
+        "path": "frames_Q005_shear_mean/",
+        "subtitle": "shear mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_shear_mean,
         "replace_frames": False,
     },
     # ── gle_mean ──────────────────────────────────────────────────────────
@@ -633,6 +889,26 @@ T.elements = [
         "object": Q003_gle_mean,
         "replace_frames": False,
     },
+    {
+        "position": (2400, 5050),
+        "size": (500, 500),
+        "path": "frames_Q004_gle_mean/",
+        "subtitle": "GLE mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_gle_mean,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 5050),
+        "size": (500, 500),
+        "path": "frames_Q005_gle_mean/",
+        "subtitle": "GLE mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_gle_mean,
+        "replace_frames": False,
+    },
     # ── edi_mean ──────────────────────────────────────────────────────────
     {
         "position": (600, 5600),
@@ -662,6 +938,26 @@ T.elements = [
         "create_frames": True,
         "type": 'V',
         "object": Q003_edi_mean,
+        "replace_frames": False,
+    },
+    {
+        "position": (2400, 5600),
+        "size": (500, 500),
+        "path": "frames_Q004_edi_mean/",
+        "subtitle": "EDI mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q004_edi_mean,
+        "replace_frames": False,
+    },
+    {
+        "position": (3000, 5600),
+        "size": (500, 500),
+        "path": "frames_Q005_edi_mean/",
+        "subtitle": "EDI mean",
+        "create_frames": True,
+        "type": 'V',
+        "object": Q005_edi_mean,
         "replace_frames": False,
     },
 ]

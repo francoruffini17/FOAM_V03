@@ -1611,6 +1611,7 @@ def _create_single_frame_object(args):
         'GP':  create_graph_property_multiple_frames,
         'GA':  create_animation_graph_multiple_frames,
         'T1A': create_animation_T1_multiple_frames,
+        'Q1A': create_animation_Q1_multiple_frames,
     }
 
     if frame_type not in frame_functions or obj is None:
@@ -1659,6 +1660,7 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
         'GP': create_graph_property_multiple_frames,
         'GA': create_animation_graph_multiple_frames,
         'T1A': create_animation_T1_multiple_frames,
+        'Q1A': create_animation_Q1_multiple_frames,
     }
 
     tasks = []

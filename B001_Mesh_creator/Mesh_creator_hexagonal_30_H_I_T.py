@@ -53,10 +53,10 @@ for val in vals:
         #     boundary_only=True,
         # )
 
-        triangulation_generator(
-            n_nodes_per_edge=int(floor(10*(1.3**i))),
-            file_name=f"C001_Mesh_files/A030_{val:03d}k_T00{i+1}.tri",
-        )
+        # triangulation_generator(
+        #     n_nodes_per_edge=int(floor(10*(1.3**i))),
+        #     file_name=f"C001_Mesh_files/A030_{val:03d}k_T00{i+1}.tri",
+        # )
 
         quadrangulation_generator(
             n_nodes_per_edge=int(floor(10*(1.3**i))),
