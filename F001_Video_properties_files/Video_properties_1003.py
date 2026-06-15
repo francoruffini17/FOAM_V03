@@ -971,3 +971,4 @@ SCONF.frame_rate = 30
 SCONF.codec = "mp4v"
 SCONF.frames_pattern = 'frames_final/frame_*.png'
 SCONF.video_output_name = 'video_test.mp4'
+SCONF.scale_width = 1800  # rescale to 1800px wide (height auto, divisible by 2)

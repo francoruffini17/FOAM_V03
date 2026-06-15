@@ -1501,6 +1501,7 @@ class SimulationConfig:
     frames_pattern: str = None
     video_output_name: str = None
     vid_folder: str = "Video_001"
+    scale_width: int = None  # e.g. 1800 → scale=1800:-2 (None = no rescaling)
 
 
 def create_placeholder_image(size, color_name):
@@ -1792,7 +1793,7 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
 
 
 
-def create_vid_from_frames(frame_pattern=None, output_path=None, frame_rate=50, codec="mp4v", delete_frames=False):
+def create_vid_from_frames(frame_pattern=None, output_path=None, frame_rate=50, codec="mp4v", delete_frames=False, scale_width=None):
 
     # Get list of image frames and sort them numerically
     frame_files = sorted(glob.glob(frame_pattern))
@@ -1829,14 +1830,10 @@ def create_vid_from_frames(frame_pattern=None, output_path=None, frame_rate=50, 
     if output_path is None:
         output_path = os.path.splitext(avi_path)[0] + ".mp4"
 
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-y",  # Overwrite output file if exists
-        "-i", avi_path,
-        "-vcodec", "libx264",
-        "-pix_fmt", "yuv420p",
-        output_path
-    ]
+    ffmpeg_cmd = ["ffmpeg", "-y", "-i", avi_path]
+    if scale_width is not None:
+        ffmpeg_cmd += ["-vf", f"scale={scale_width}:-2"]
+    ffmpeg_cmd += ["-vcodec", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", output_path]
     try:
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print(f"Video saved as {output_path}")
@@ -1875,6 +1872,6 @@ def create_vid_from_frames_for_sim(sim_num, SCONF):
     base, ext = os.path.splitext(output_path)
     output_path = f"{base}_SIM_{sim_num:03d}{ext}"
 
-    create_vid_from_frames(frame_pattern = frame_pattern, output_path = output_path, frame_rate = SCONF.frame_rate, codec = SCONF.codec, delete_frames = SCONF.delete_concat_frames_after_video)
+    create_vid_from_frames(frame_pattern=frame_pattern, output_path=output_path, frame_rate=SCONF.frame_rate, codec=SCONF.codec, delete_frames=SCONF.delete_concat_frames_after_video, scale_width=getattr(SCONF, 'scale_width', None))
 
 
