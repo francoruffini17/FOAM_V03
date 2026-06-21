@@ -1972,6 +1972,452 @@ def create_PKL_Q2(DATA_Q1: dict, output_path: str = None, sim_num: int = None,
 
 
 # ---------------------------------------------------------------------------
+# TP1 pickle: FEM original elements (mixed tri/quad) — no secondary mesh file
+# ---------------------------------------------------------------------------
+
+def create_PKL_TP1(DATA_C2: dict, sim_num: int, output_path: str = None) -> dict:
+    """
+    Create the PKL_TP1 dictionary using the original FEM elements directly.
+
+    Unlike T1/Q1, no secondary mesh file is needed: elements and nodes come
+    from DATA_C2 itself. Mixed 3-node (triangle) and 4-node (quad) elements
+    are supported. Elements with other node counts are skipped with a warning.
+
+    Parameters
+    ----------
+    DATA_C2 : dict
+        Mesh data with keys 'nodes_time', 'elements', 't'.
+        nodes_time[ti][str(nid)] = (x, y)  (0-based ti, 1-based string key)
+        elements[str(eid)] = [n1, n2, ...]  (1-based node IDs)
+        t = list of floats
+    sim_num : int
+        Simulation number. Used to load source provenance from JSON and build
+        the default output path.
+    output_path : str, optional
+        If given, the result is pickled here.
+        Defaults to 'I001_Results/DATA_PICK_{sim_num:03d}_TP1.pkl'.
+
+    Returns
+    -------
+    dict  PKL_TP1
+        't'                              -> list of timesteps
+        'nodes'[ti][nid_1based]          -> (x, y, nid)
+        'elements'[eid_1based]           -> [n1, n2, ...] 0-based node indices
+        'element_types'[eid_1based]      -> 3 (triangle) or 4 (quad)
+        'elements_area'[eid_1based][ti]  -> area at timestep ti
+        'elements_area_normalized'[eid_1based][ti] -> area(ti)/area(0)
+        'node_matches'[nid]              -> nid (identity mapping, all FEM nodes)
+    """
+    json_path = f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json'
+    with open(json_path, 'r') as fj:
+        sim_json = json.load(fj)
+    mesh_file_path = sim_json['input_name']
+    print(f"  Mesh file: {mesh_file_path}")
+
+    def _poly_area(pts) -> float:
+        n = len(pts)
+        area = 0.0
+        for k in range(n):
+            xk, yk = pts[k]
+            xk1, yk1 = pts[(k + 1) % n]
+            area += xk * yk1 - xk1 * yk
+        return 0.5 * abs(area)
+
+    # Build element structures; convert 1-based DATA_C2 node IDs to 0-based
+    elements_0based = {}
+    element_types   = {}
+    for ek, nodes_1based in DATA_C2['elements'].items():
+        eid = int(ek)
+        n_nodes = len(nodes_1based)
+        if n_nodes not in (3, 4):
+            print(f"  Warning: element {eid} has {n_nodes} nodes; skipping")
+            continue
+        elements_0based[eid] = [n - 1 for n in nodes_1based]
+        element_types[eid]   = n_nodes
+
+    n_elems     = len(elements_0based)
+    n_timesteps = len(DATA_C2['nodes_time'])
+    n_tri = sum(1 for v in element_types.values() if v == 3)
+    n_quad = sum(1 for v in element_types.values() if v == 4)
+    print(f"  FEM elements: {n_elems} ({n_tri} tri, {n_quad} quad)")
+
+    nodes_out          = [{} for _ in range(n_timesteps)]
+    elements_area      = {eid: {} for eid in elements_0based}
+    elements_area_norm = {eid: {} for eid in elements_0based}
+    original_areas     = {}
+
+    for ti in range(n_timesteps):
+        ti_nodes = DATA_C2['nodes_time'][ti]
+        nodes_ti = {}
+        for nk, (x, y) in ti_nodes.items():
+            nid = int(nk)
+            nodes_ti[nid] = (float(x), float(y), nid)
+        nodes_out[ti] = nodes_ti
+
+        for eid, node_indices in elements_0based.items():
+            pts = [nodes_ti[n + 1][:2] for n in node_indices]
+            area = _poly_area(pts)
+            elements_area[eid][ti] = area
+            if ti == 0:
+                original_areas[eid] = area
+            orig = original_areas.get(eid, area)
+            elements_area_norm[eid][ti] = area / orig if orig > 1e-30 else 0.0
+
+        print(f"  Timestep {ti + 1}/{n_timesteps} done")
+
+    all_nids = {int(nk) for nk in DATA_C2['nodes_time'][0]}
+    node_matches = {nid: nid for nid in all_nids}
+
+    PKL_TP1 = {
+        **_source_metadata(mesh_file_path),
+        't'                        : DATA_C2['t'],
+        'nodes'                    : nodes_out,
+        'elements'                 : elements_0based,
+        'element_types'            : element_types,
+        'elements_area'            : elements_area,
+        'elements_area_normalized' : elements_area_norm,
+        'node_matches'             : node_matches,
+    }
+
+    if output_path is None:
+        output_path = f'I001_Results/DATA_PICK_{sim_num:03d}_TP1.pkl'
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(output_path, 'wb') as fp:
+        pickle.dump(PKL_TP1, fp)
+    print(f"PKL_TP1 saved to '{output_path}'")
+
+    return PKL_TP1
+
+
+# ---------------------------------------------------------------------------
+# TP2 pickle: statistical summary of TP1 (mixed tri/quad FEM elements)
+# ---------------------------------------------------------------------------
+
+def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
+                   w_param_sets: list = None) -> dict:
+    """
+    Compute statistical summary of element data from a PKL_TP1 dictionary.
+
+    Handles mixed 3-node (triangle) and 4-node (quad) elements.
+    Deformation gradient for triangles: F = [p2-p1|p3-p1] @ inv([P2_0-P1_0|P3_0-P1_0]).
+    Deformation gradient for quads: bilinear shape functions at centroid (xi=0, eta=0).
+
+    Parameters
+    ----------
+    DATA_TP1 : dict
+        PKL_TP1 dictionary.
+    output_path : str, optional
+        Defaults to 'I001_Results/DATA_PICK_{sim_num:03d}_TP2.pkl'.
+    sim_num : int, optional
+        Used to build a default output_path when output_path is None.
+    w_param_sets : list of tuple, optional
+        List of (K, G, m, n) parameter tuples for the strain energy w.
+        Defaults to [(1, 1, 1, 1), (1, 1, 2, 2)].
+
+    Returns
+    -------
+    dict  PKL_TP2
+        Same key structure as PKL_T2/PKL_Q2. 'edge_sizes', 'epsilon', and
+        'edi' have 3 entries per tri element and 4 entries per quad element.
+        'q' = 4*sqrt(3)*A/(l1^2+l2^2+l3^2) for tri,
+              4*A/(l1^2+l2^2+l3^2+l4^2) for quad.
+    """
+    t        = DATA_TP1['t']
+    n_t      = len(t)
+    elem_ids = sorted(DATA_TP1['elements'].keys())
+    n_elems  = len(elem_ids)
+    etypes   = DATA_TP1['element_types']
+
+    # 1. Flat area matrices
+    areas_mat = np.zeros((n_elems, n_t), dtype=float)
+    norm_mat  = np.zeros((n_elems, n_t), dtype=float)
+
+    for ei, eid in enumerate(elem_ids):
+        ea  = DATA_TP1['elements_area'][eid]
+        ean = DATA_TP1['elements_area_normalized'][eid]
+        for ti in range(n_t):
+            areas_mat[ei, ti] = ea[ti]
+            norm_mat[ei, ti]  = ean[ti]
+
+    # 2. time_variant statistics
+    tv_areas = {
+        'min' : areas_mat.min(axis=0).tolist(),
+        'max' : areas_mat.max(axis=0).tolist(),
+        'mean': areas_mat.mean(axis=0).tolist(),
+        'std' : areas_mat.std(axis=0).tolist(),
+    }
+    tv_norm = {
+        'min' : norm_mat.min(axis=0).tolist(),
+        'max' : norm_mat.max(axis=0).tolist(),
+        'mean': norm_mat.mean(axis=0).tolist(),
+        'std' : norm_mat.std(axis=0).tolist(),
+    }
+
+    # 3. time_invariant statistics
+    ti_areas = {}
+    ti_norm  = {}
+    for ei, eid in enumerate(elem_ids):
+        row      = areas_mat[ei]
+        row_norm = norm_mat[ei]
+        ti_areas[eid] = {
+            'min' : float(row.min()),  'max' : float(row.max()),
+            'mean': float(row.mean()), 'std' : float(row.std()),
+        }
+        ti_norm[eid] = {
+            'min' : float(row_norm.min()),  'max' : float(row_norm.max()),
+            'mean': float(row_norm.mean()), 'std' : float(row_norm.std()),
+        }
+
+    # 4. general_information
+    general_information = {
+        'n_elements'           : n_elems,
+        'area_global_min'      : float(areas_mat.min()),
+        'area_global_max'      : float(areas_mat.max()),
+        'norm_area_global_min' : float(norm_mat.min()),
+        'norm_area_global_max' : float(norm_mat.max()),
+    }
+
+    # 5. eta
+    r     = 1.0
+    it    = n_elems
+    std_i = (r / 2.0) * np.sqrt(it / (it - 1)) if it > 1 else 1.0
+    eta   = [1.0 - (tv_norm['std'][ti] / std_i) for ti in range(n_t)]
+
+    # 6. Per-element mechanics
+    # Bilinear shape function derivatives at centroid (xi=0, eta=0) for quads
+    B_quad = np.array([[-0.25,  0.25, 0.25, -0.25],
+                       [-0.25, -0.25, 0.25,  0.25]], dtype=float)
+
+    edge_sizes = {}
+    q          = {}
+    epsilon    = {}
+    F_grad     = {}
+    shear      = {}
+    gle        = {}
+    edi        = {}
+    J_det      = {}
+    C_iso      = {}
+
+    if w_param_sets is None:
+        w_param_sets = [(1, 1, 1, 1), (1, 1, 2, 2)]
+    _w_param_sets = w_param_sets
+    w  = {params: {} for params in _w_param_sets}
+    I2 = np.eye(2)
+
+    for ei, eid in enumerate(elem_ids):
+        node_indices = DATA_TP1['elements'][eid]   # 0-based
+        n_nodes      = etypes[eid]                 # 3 or 4
+
+        # Reference positions at t=0 (nodes dict uses 1-based int keys)
+        p0_ref = [np.array(DATA_TP1['nodes'][0][n + 1][:2], dtype=float)
+                  for n in node_indices]
+
+        if n_nodes == 3:
+            p1_0, p2_0, p3_0 = p0_ref
+            l1_0 = float(np.linalg.norm(p2_0 - p1_0))
+            l2_0 = float(np.linalg.norm(p3_0 - p2_0))
+            l3_0 = float(np.linalg.norm(p1_0 - p3_0))
+            # Reference deformation matrix for triangle
+            dX = np.column_stack([p2_0 - p1_0, p3_0 - p1_0])
+            try:
+                dX_inv = np.linalg.inv(dX)
+            except np.linalg.LinAlgError:
+                dX_inv = np.linalg.pinv(dX)
+        else:  # quad
+            p1_0, p2_0, p3_0, p4_0 = p0_ref
+            l1_0 = float(np.linalg.norm(p2_0 - p1_0))
+            l2_0 = float(np.linalg.norm(p3_0 - p2_0))
+            l3_0 = float(np.linalg.norm(p4_0 - p3_0))
+            l4_0 = float(np.linalg.norm(p1_0 - p4_0))
+            P_ref_0 = np.array([p1_0, p2_0, p3_0, p4_0], dtype=float)
+            J_ref_0 = B_quad @ P_ref_0
+            try:
+                J_ref_0_inv_T = np.linalg.inv(J_ref_0.T)
+            except np.linalg.LinAlgError:
+                J_ref_0_inv_T = np.linalg.pinv(J_ref_0.T)
+
+        edge_sizes[eid] = {}
+        q[eid]          = {}
+        epsilon[eid]    = {}
+        F_grad[eid]     = {}
+        shear[eid]      = {}
+        gle[eid]        = {}
+        edi[eid]        = {}
+        J_det[eid]      = {}
+        C_iso[eid]      = {}
+        for params in _w_param_sets:
+            w[params][eid] = {}
+
+        for ti in range(n_t):
+            p_def = [np.array(DATA_TP1['nodes'][ti][n + 1][:2], dtype=float)
+                     for n in node_indices]
+            area  = areas_mat[ei, ti]
+
+            if n_nodes == 3:
+                p1, p2, p3 = p_def
+                l1 = float(np.linalg.norm(p2 - p1))
+                l2 = float(np.linalg.norm(p3 - p2))
+                l3 = float(np.linalg.norm(p1 - p3))
+
+                edge_sizes[eid][ti] = [l1, l2, l3]
+                sum_l2 = l1**2 + l2**2 + l3**2
+                q[eid][ti] = (4.0 * np.sqrt(3.0) * area / sum_l2) if sum_l2 > 1e-30 else 0.0
+                epsilon[eid][ti] = [
+                    (l1 - l1_0) / l1_0 if l1_0 > 1e-30 else 0.0,
+                    (l2 - l2_0) / l2_0 if l2_0 > 1e-30 else 0.0,
+                    (l3 - l3_0) / l3_0 if l3_0 > 1e-30 else 0.0,
+                ]
+                edi[eid][ti] = (1.0 / 3.0) * (
+                    (abs(l1 / l1_0) if l1_0 > 1e-30 else 0.0) +
+                    (abs(l2 / l2_0) if l2_0 > 1e-30 else 0.0) +
+                    (abs(l3 / l3_0) if l3_0 > 1e-30 else 0.0)
+                )
+                dx = np.column_stack([p2 - p1, p3 - p1])
+                F_mat = dx @ dX_inv
+
+            else:  # quad
+                p1, p2, p3, p4 = p_def
+                l1 = float(np.linalg.norm(p2 - p1))
+                l2 = float(np.linalg.norm(p3 - p2))
+                l3 = float(np.linalg.norm(p4 - p3))
+                l4 = float(np.linalg.norm(p1 - p4))
+
+                edge_sizes[eid][ti] = [l1, l2, l3, l4]
+                sum_l2 = l1**2 + l2**2 + l3**2 + l4**2
+                q[eid][ti] = (4.0 * area / sum_l2) if sum_l2 > 1e-30 else 0.0
+                epsilon[eid][ti] = [
+                    (l1 - l1_0) / l1_0 if l1_0 > 1e-30 else 0.0,
+                    (l2 - l2_0) / l2_0 if l2_0 > 1e-30 else 0.0,
+                    (l3 - l3_0) / l3_0 if l3_0 > 1e-30 else 0.0,
+                    (l4 - l4_0) / l4_0 if l4_0 > 1e-30 else 0.0,
+                ]
+                edi[eid][ti] = (1.0 / 4.0) * (
+                    (abs(l1 / l1_0) if l1_0 > 1e-30 else 0.0) +
+                    (abs(l2 / l2_0) if l2_0 > 1e-30 else 0.0) +
+                    (abs(l3 / l3_0) if l3_0 > 1e-30 else 0.0) +
+                    (abs(l4 / l4_0) if l4_0 > 1e-30 else 0.0)
+                )
+                P_def = np.array([p1, p2, p3, p4], dtype=float)
+                J_def = B_quad @ P_def
+                F_mat = J_def.T @ J_ref_0_inv_T
+
+            F_grad[eid][ti] = F_mat.tolist()
+            shear[eid][ti]  = 0.5 * float(np.trace(F_mat.T @ F_mat))
+            E_mat           = 0.5 * (F_mat.T @ F_mat - I2)
+            gle[eid][ti]    = float(np.trace(E_mat))
+
+            J = float(np.linalg.det(F_mat))
+            J_det[eid][ti] = J
+            J_pos = max(abs(J), 1e-30)
+            C_mat = (J_pos ** (-2.0 / 3.0)) * (F_mat.T @ F_mat)
+            C_iso[eid][ti] = C_mat.tolist()
+
+            for (K, G, m, n) in _w_param_sets:
+                vol = (K / 4.0) * (
+                    (1.0 / m**2) * (J_pos**m - 1.0)**2
+                    + (1.0 / m**2) * (J_pos**(-m) - 1.0)**2
+                )
+                C_n  = fractional_matrix_power(C_mat,  n)
+                C_ni = fractional_matrix_power(C_mat, -n)
+                iso = (G / 4.0) * (
+                    (1.0 / n**2) * np.linalg.norm(C_n  - I2, 'fro')**2
+                    + (1.0 / n**2) * np.linalg.norm(C_ni - I2, 'fro')**2
+                )
+                w[(K, G, m, n)][eid][ti] = float(vol + iso)
+
+    # 7. Assemble per-timestep aggregates
+    shear_mean = [float(np.mean([shear[eid][ti] for eid in elem_ids])) for ti in range(n_t)]
+    gle_mean   = [float(np.mean([gle[eid][ti]   for eid in elem_ids])) for ti in range(n_t)]
+    edi_mean   = [float(np.mean([edi[eid][ti]   for eid in elem_ids])) for ti in range(n_t)]
+
+    w_mean = {
+        params: [float(np.mean([w[params][eid][ti] for eid in elem_ids])) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    w_std = {
+        params: [float(np.std([w[params][eid][ti] for eid in elem_ids])) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    _cv_eps = 1e-30
+    w_cv = {
+        params: [float(w_std[params][ti] / (abs(w_mean[params][ti]) + _cv_eps)) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+
+    _area0     = {eid: float(DATA_TP1['elements_area'][eid][0]) for eid in elem_ids}
+    _area0_sum = max(float(sum(_area0.values())), 1e-30)
+    W = {
+        params: [float(sum(w[params][eid][ti] * _area0[eid] for eid in elem_ids)) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    _w_area_mean = {
+        params: [float(W[params][ti] / _area0_sum) for ti in range(n_t)]
+        for params in _w_param_sets
+    }
+    w_std_area_weighted = {
+        params: [
+            float(np.sqrt(
+                sum(_area0[eid] * (w[params][eid][ti] - _w_area_mean[params][ti])**2
+                    for eid in elem_ids) / _area0_sum
+            ))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+    w_cv_area_weighted = {
+        params: [
+            float(w_std_area_weighted[params][ti] / (abs(_w_area_mean[params][ti]) + _cv_eps))
+            for ti in range(n_t)
+        ]
+        for params in _w_param_sets
+    }
+
+    PKL_TP2 = {
+        **_propagate_source_metadata(DATA_TP1),
+        't'                   : t,
+        'time_variant'        : {'areas': tv_areas, 'normalized_areas': tv_norm},
+        'time_invariant'      : {'areas': ti_areas, 'normalized_areas': ti_norm},
+        'general_information' : general_information,
+        'eta'        : eta,
+        'edge_sizes' : edge_sizes,
+        'q'          : q,
+        'epsilon'    : epsilon,
+        'F'          : F_grad,
+        'shear'      : shear,
+        'gle'        : gle,
+        'shear_mean' : shear_mean,
+        'gle_mean'   : gle_mean,
+        'edi'        : edi,
+        'edi_mean'   : edi_mean,
+        'J'          : J_det,
+        'C'          : C_iso,
+        'w'          : w,
+        'w_mean'     : w_mean,
+        'w_std'      : w_std,
+        'w_cv'       : w_cv,
+        'w_std_area_weighted': w_std_area_weighted,
+        'w_cv_area_weighted' : w_cv_area_weighted,
+        'W'          : W,
+    }
+
+    if output_path is None and sim_num is not None:
+        output_path = f'I001_Results/DATA_PICK_{sim_num:03d}_TP2.pkl'
+
+    if output_path is not None:
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(output_path, 'wb') as fp:
+            pickle.dump(PKL_TP2, fp)
+        print(f"PKL_TP2 saved to '{output_path}'")
+
+    return PKL_TP2
+
+
+# ---------------------------------------------------------------------------
 # J1 pickle: dual-mesh nodes mapped to deformed config + bar stresses
 # ---------------------------------------------------------------------------
 
@@ -3185,7 +3631,7 @@ def process_simulation(args):
     """Processes a single simulation based on input arguments."""
 
     try:
-        i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, delete_csv, n_workers, max_memory_gb = args
+        i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, delete_csv, n_workers, max_memory_gb = args
         
         csv_file = f'I001_Results/RES_SIM_{i:03}.csv'
 
@@ -3734,6 +4180,45 @@ def process_simulation(args):
                     print(f"Error processing Q2 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
 
 
+        if in_TP1 in ('y', 'Y'):
+            data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"TP1 for simulation {i:03d}")
+            if data_varC2 is None:
+                print(f"Skipping TP1 stage for simulation {i:03d}: missing C2 input; continuing with remaining stages")
+            else:
+                try:
+                    data_TP1 = create_PKL_TP1(data_varC2, sim_num=i)
+
+                    if in_TP2 in ('y', 'Y'):
+                        try:
+                            create_PKL_TP2(
+                                data_TP1,
+                                sim_num=i,
+                                w_param_sets=[(1, 1, 1, 1), (1, 1, 2, 2)],
+                            )
+                        except Exception as e:
+                            print(f"Error processing TP2 for simulation {i:03d}: {e}")
+
+                    del data_TP1
+                except Exception as e:
+                    print(f"Error processing TP1 for simulation {i:03d}: {e}")
+
+                del data_varC2
+
+        elif in_TP2 in ('y', 'Y'):
+            tp1_path = f'I001_Results/DATA_PICK_{i:03}_TP1.pkl'
+            data_TP1 = _load_pickle_or_skip(tp1_path, f"TP2 for simulation {i:03d}")
+            if data_TP1 is not None:
+                try:
+                    create_PKL_TP2(
+                        data_TP1,
+                        sim_num=i,
+                        w_param_sets=[(1, 1, 1, 1), (1, 1, 2, 2)],
+                    )
+                    del data_TP1
+                except Exception as e:
+                    print(f"Error processing TP2 for simulation {i:03d}: {e}")
+
+
         if delete_csv in ('y','Y'):
             if os.path.exists(csv_file):
                 os.remove(csv_file)
@@ -3786,6 +4271,8 @@ if __name__ == "__main__":
     in_Q2 = input('Output file Q2? (y/n): ') or 'n'
     Q_ini = input('Initial Q index: ') or '0'
     Q_fin = input('Final Q index: ') or '0'
+    in_TP1 = input('Output file TP1? (y/n): ') or 'n'
+    in_TP2 = input('Output file TP2? (y/n): ') or 'n'
     delete_csv = input('Delete csv? (y/n): ') or 'n'
     n_workers_str = input('Number of parallel workers for G2_exact (default=auto): ') or '0'
     max_memory_gb_str = input('Max memory in GB for G2_exact (default=auto): ') or '0'
@@ -3810,7 +4297,7 @@ if __name__ == "__main__":
     K_alg = None if K_alg == '1' else 'bfs'
 
     # Prepare arguments for multiprocessing
-    args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
+    args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
 
     # Use multiprocessing to process simulations in parallel
     with multiprocessing.Pool() as pool:

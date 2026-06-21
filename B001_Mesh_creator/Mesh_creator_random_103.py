@@ -1,31 +1,35 @@
 """
-Mesh_creator_random_101
+Mesh_creator_random_103
 =======================
-RSA random foam mesh with right-skew hole-size distribution, porosity ≈ 0.50.
+RSA random foam mesh with right-skew hole-size distribution, porosity ≈ 0.60.
+Variant of R102 with smaller holes → more holes at the same porosity.
 
-Constraints (fixed):
+Constraints (fixed, same as R101/R102):
   min_distance_between_holes = 0.01
   edge_left/right/bottom/top = 0.01
   hole_size_distribution     = 'right_skew'
 
-Empirical sweep findings (d=0.01, seed=42, target=0.50):
+Compared to R102 (min=0.04, max=0.25, s=2.5 → 56 holes):
+  Reducing max_hole from 0.25 → 0.15 and min_hole from 0.04 → 0.02 forces
+  RSA to place many more smaller holes to reach the same total void area.
 
-  The key to achieving 0.50 with right_skew and d=0.01 is widening
-  max_hole_size to 0.15 so that a few large holes contribute enough area even
-  with a strongly skewed distribution.  With the original max=0.09, any clearly
-  right-skewed setting (s≥2) jams RSA below 0.46.
+Empirical sweep findings (d=0.01, seed=42, target=0.60):
 
   Winning configuration:
-    min=0.04  max=0.15  s=2.5  →  achieved=0.5010  (104 holes)   ← PRIMARY
-    min=0.04  max=0.15  s=2.0  →  achieved=0.5017  (79 holes)    ← ALT (fewer holes)
-    min=0.04  max=0.15  s=3.0  →  achieved=0.4947  (124 holes)   ← just short of 0.50
+    min=0.02  max=0.15  s=1.5  →  achieved=0.6001  (117 holes)   ← PRIMARY
+    min=0.02  max=0.20  s=2.0  →  achieved=0.6003  ( 86 holes)   ← ALT (fewer holes, clearer skew)
+    min=0.01  max=0.20  s=2.0  →  achieved=0.6000  (100 holes)   ← ALT-B
 
-  Beta(2,5) (s=2.5) shape on diameter range [0.04, 0.15]:
-    mode ≈ 0.062, mean ≈ 0.071 — clear right tail to 0.15.
-    104 holes give a clean histogram with obvious right skew.
+  Beta(2,3) (s=1.5) on diameter range [0.02, 0.15]:
+    mode ≈ 0.063, mean ≈ 0.072 — peak at small sizes, right tail to 0.15.
 
-Output: C001_Mesh_files/R101.mesh.json
-        C001_Mesh_files/R101_holes.png
+Progression:
+  R101: min=0.04, max=0.15, s=2.5  →  porosity≈0.50  (104 holes)
+  R102: min=0.04, max=0.25, s=2.5  →  porosity≈0.60  ( 56 holes)  [larger holes]
+  R103: min=0.02, max=0.15, s=1.5  →  porosity≈0.60  (117 holes)  [more, smaller holes]
+
+Output: C001_Mesh_files/R103.mesh.json
+        C001_Mesh_files/R103_holes.png
 """
 
 import sys, os
@@ -41,13 +45,13 @@ from A001_functions.Hex_5 import (
 )
 
 # ---------------------------------------------------------------------------
-# PRIMARY — min=0.04, max=0.15, s=2.5  →  achieved ≈ 0.50  (104 holes)
+# PRIMARY — min=0.02, max=0.15, s=1.5  →  achieved ≈ 0.60  (117 holes)
 # ---------------------------------------------------------------------------
 cfg = MeshConfigRand(
     domain_size=1.0,
-    porosity=0.50,
-    min_hole_size=0.04,                   # diameter (same as R100)
-    max_hole_size=0.15,                   # wider range; large holes fill area
+    porosity=0.60,
+    min_hole_size=0.02,                   # smaller than R102 (was 0.04)
+    max_hole_size=0.15,                   # smaller than R102 (was 0.25)
     min_distance_between_holes=0.01,      # FIXED — do not change
     seed=42,
     edge_left=0.01,                       # FIXED
@@ -55,16 +59,16 @@ cfg = MeshConfigRand(
     edge_bottom=0.01,
     edge_top=0.01,
     hole_size_distribution='right_skew',  # FIXED — Beta(2, 2*skew_strength)
-    hole_size_skew_strength=2.5,          # Beta(2,5) — clearly right-skewed
+    hole_size_skew_strength=1.5,          # Beta(2,3) — right-skewed, ~117 holes
     placement_algorithm='rsa',
 )
 
 # ---------------------------------------------------------------------------
-# ALT — s=2.0 gives 79 holes (fewer, larger); s=3.0 falls just short of 0.50
+# ALT — s=2.0 with max=0.20 gives clearer skew but fewer holes (86)
 # ---------------------------------------------------------------------------
 # cfg = MeshConfigRand(
-#     domain_size=1.0, porosity=0.50,
-#     min_hole_size=0.04, max_hole_size=0.15,
+#     domain_size=1.0, porosity=0.60,
+#     min_hole_size=0.02, max_hole_size=0.20,
 #     min_distance_between_holes=0.01, seed=42,
 #     edge_left=0.01, edge_right=0.01, edge_bottom=0.01, edge_top=0.01,
 #     hole_size_distribution='right_skew',
@@ -75,7 +79,7 @@ cfg = MeshConfigRand(
 # ---------------------------------------------------------------------------
 # Build the FE mesh
 # ---------------------------------------------------------------------------
-mesh_path = "C001_Mesh_files/R101.mesh.json"
+mesh_path = "C001_Mesh_files/R103.mesh.json"
 
 generator, mesh = create_random_mesh(
     config=cfg,
@@ -93,12 +97,11 @@ generator, mesh = create_random_mesh(
     periodic="both",
 )
 
-print(f"\nR101: {len(generator.hole_centers)} holes | "
+print(f"\nR103: {len(generator.hole_centers)} holes | "
       f"{mesh.n_nodes} nodes | {mesh.n_elements} elements -> {mesh_path}")
 
 # ---------------------------------------------------------------------------
 # Hole distribution figure — saved next to the mesh file.
-# generator.hole_centers / hole_radii are already rescaled to [0, L].
 # ---------------------------------------------------------------------------
 centers   = generator.hole_centers
 radii     = generator.hole_radii
@@ -142,12 +145,12 @@ ax_hist.axvline(mean_d + std_d, color='orange', linestyle=':', linewidth=1.2)
 ax_hist.set_xlabel('Hole diameter')
 ax_hist.set_ylabel('Count')
 ax_hist.set_title(
-    f'Hole size distribution  (right_skew  Beta(2,5),  s={cfg.hole_size_skew_strength})'
+    f'Hole size distribution  (right_skew  Beta(2,3),  s={cfg.hole_size_skew_strength})'
 )
 ax_hist.legend()
 
 fig.suptitle(
-    f'R101 — RSA  |  right_skew s={cfg.hole_size_skew_strength}  |  '
+    f'R103 — RSA  |  right_skew s={cfg.hole_size_skew_strength}  |  '
     f'porosity = {achieved:.4f}  |  d = {cfg.min_distance_between_holes}',
     fontsize=12,
 )

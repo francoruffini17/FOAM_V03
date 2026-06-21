@@ -28,6 +28,7 @@ from A001_functions.mesh_functions import plot_foam_mesh
 from A001_functions.mesh_functions import plot_J1_graph_mesh
 from A001_functions.mesh_functions import plot_T1_triangulation_mesh
 from A001_functions.mesh_functions import plot_Q1_quadrangulation_mesh
+from A001_functions.mesh_functions import plot_TP1_mesh
 from A001_functions.fem_stress_interpolation import interpolate_stress
 
 ### ----------------------------- plot frame graph parameter -----------------------------##
@@ -1240,6 +1241,163 @@ def create_animation_Q1_multiple_frames(sim_num, Q, save_path=None, frames_forma
         create_animation_Q1_frame(data_C2, data_Q1, Q=Q, ti=ti, q2=data_Q2)
 
 
+### ---- PLOT ANIMATION TP1 (original FEM mesh, mixed tri/quad) ---- ###
+
+@dataclass
+class frame_animation_TP1:
+    dpi: int = 50
+    title: str = None
+    xlabel: str = None
+    ylabel: str = None
+    xlim: float = None
+    ylim: float = None
+    save_path: str = None
+    background: bool = False
+    figsize: list[float] = None
+    num_frames: int = None
+    TP1_ext: str = ''
+    TP2_ext: str = None  # set to load TP2 data when color_by != 'area'
+    plot_TP1_params: PlotT1Params = field(default_factory=PlotT1Params)
+
+
+def create_animation_TP1_frame(tp1, P=None, ti=None, tp2=None):
+    """
+    Create a single animation frame with the TP1 FEM mesh coloured by A/A₀
+    (or a TP2 metric).  Unlike T1/Q1 frames, no secondary mesh is overlaid —
+    the TP1 elements *are* the FEM mesh.
+
+    Parameters
+    ----------
+    tp1 : dict   DATA_TP1 dictionary.
+    P   : frame_animation_TP1   Frame configuration object.
+    ti  : int    Timestep index (0-based).
+    tp2 : dict, optional   DATA_TP2 dictionary for non-area colouring.
+    """
+    _color_by      = P.plot_TP1_params.color_by
+    _color_by_area = (_color_by != 'none')
+    _custom_values = None
+    _cb_label      = P.plot_TP1_params.colorbar_label
+
+    if _color_by not in ('area', 'none'):
+        elem_ids = sorted(tp1['elements'].keys())
+        if isinstance(_color_by, tuple) and len(_color_by) == 2:
+            _top_key, _sub_key = _color_by
+            if tp2 is not None and _top_key in tp2 and _sub_key in tp2[_top_key]:
+                try:
+                    _custom_values = np.array(
+                        [tp2[_top_key][_sub_key][eid][ti] for eid in elem_ids], dtype=float
+                    )
+                    if _cb_label is None:
+                        _cb_label = f"{_top_key}{list(_sub_key)}"
+                except (KeyError, TypeError, IndexError) as _e:
+                    print(f"Warning: could not read TP2['{_top_key}'][{_sub_key}] at ti={ti}: {_e}")
+            else:
+                print(f"Warning: color_by={_color_by!r} requested but TP2 data not available; "
+                      "falling back to area colouring.")
+        elif tp2 is not None and _color_by in tp2:
+            try:
+                _custom_values = np.array(
+                    [tp2[_color_by][eid][ti] for eid in elem_ids], dtype=float
+                )
+                if _cb_label is None:
+                    _cb_label = _color_by
+            except (KeyError, TypeError, IndexError) as _e:
+                print(f"Warning: could not read TP2['{_color_by}'] at ti={ti}: {_e}")
+        else:
+            print(f"Warning: color_by='{_color_by}' requested but TP2 data not available; "
+                  "falling back to area colouring.")
+
+    ax = plot_TP1_mesh(
+        tp1, ti,
+        figsize=P.plot_TP1_params.figsize,
+        title=P.plot_TP1_params.title,
+        show_edges=P.plot_TP1_params.show_edges,
+        edge_color=P.plot_TP1_params.edge_color,
+        linewidth=P.plot_TP1_params.linewidth,
+        show_nodes=P.plot_TP1_params.show_nodes,
+        show_node_labels=P.plot_TP1_params.show_node_labels,
+        node_color=P.plot_TP1_params.node_color,
+        node_size=P.plot_TP1_params.node_size,
+        color_by_area=_color_by_area,
+        custom_values=_custom_values,
+        colorbar_label=_cb_label,
+        cmap=P.plot_TP1_params.cmap,
+        vmin=P.plot_TP1_params.vmin,
+        vmax=P.plot_TP1_params.vmax,
+        color_limit=P.plot_TP1_params.color_limit,
+        face_color=P.plot_TP1_params.face_color,
+        face_alpha=P.plot_TP1_params.face_alpha,
+        show_undeformed=P.plot_TP1_params.show_undeformed,
+        undeformed_edge_color=P.plot_TP1_params.undeformed_edge_color,
+        magnification=P.plot_TP1_params.magnification,
+        node_scale=P.plot_TP1_params.node_scale,
+        show_colorbar=P.plot_TP1_params.show_colorbar,
+    )
+
+    if P.xlim is not None:
+        ax.set_xlim(P.xlim)
+    if P.ylim is not None:
+        ax.set_ylim(P.ylim)
+    if P.xlabel is not None:
+        ax.set_xlabel(P.xlabel)
+    if P.ylabel is not None:
+        ax.set_ylabel(P.ylabel)
+    if P.title is not None:
+        ax.set_title(P.title)
+    if P.background == False:
+        ax.set_axis_off()
+        ax.grid(False)
+
+    fig = ax.get_figure()
+    if P.save_path:
+        fig.savefig(P.save_path, dpi=P.dpi, bbox_inches='tight', transparent=True)
+        plt.close(fig)
+        print(f"Frame saved to {P.save_path}")
+    else:
+        plt.show()
+
+
+def create_animation_TP1_multiple_frames(sim_num, P, save_path=None, frames_format='png'):
+    """
+    Create multiple TP1 animation frames for a simulation.
+
+    Loads DATA_TP1 pickle (and optionally DATA_TP2), then renders one frame
+    per timestep (or a subset if P.num_frames is set).
+    """
+    tp1_suffix = f'_TP1_{P.TP1_ext}' if P.TP1_ext else '_TP1'
+    tp1_path   = f'I001_Results/DATA_PICK_{sim_num:03d}{tp1_suffix}.pkl'
+    with open(tp1_path, 'rb') as f:
+        data_TP1 = pickle.load(f)
+
+    data_TP2 = None
+    if P.plot_TP1_params.color_by not in ('area', 'none'):
+        if P.TP2_ext is not None:
+            tp2_suffix = f'_TP2_{P.TP2_ext}' if P.TP2_ext else '_TP2'
+            tp2_path   = f'I001_Results/DATA_PICK_{sim_num:03d}{tp2_suffix}.pkl'
+            try:
+                with open(tp2_path, 'rb') as f:
+                    data_TP2 = pickle.load(f)
+                print(f"Loaded TP2 data from {tp2_path}")
+            except FileNotFoundError:
+                print(f"Warning: TP2 data not found at {tp2_path}; "
+                      "defaulting to area colouring.")
+        else:
+            print(f"Warning: color_by='{P.plot_TP1_params.color_by}' requires "
+                  "TP2_ext to be set on frame_animation_TP1.")
+
+    os.makedirs(save_path, exist_ok=True)
+
+    total_frames = len(data_TP1['t'])
+    if getattr(P, 'num_frames', None) is not None and P.num_frames is not None and P.num_frames < total_frames:
+        indices = np.linspace(0, total_frames - 1, P.num_frames, dtype=int)
+    else:
+        indices = range(total_frames)
+
+    for ti in indices:
+        P.save_path = save_path + f'frame_{ti:08d}.{frames_format}'
+        P.t_x = ti
+        create_animation_TP1_frame(data_TP1, P=P, ti=ti, tp2=data_TP2)
+
 
 # # GRAPHS
 
@@ -1522,9 +1680,11 @@ def safe_load_image(path, size):
     try:
         img = Image.open(path).convert("RGB")
         if size is not None:
-            return img.resize(size)
+            resized = img.resize(size)
+            img.close()
+            return resized
         else:
-            return img  # Return original size if size is None
+            return img
     except Exception:
         return create_placeholder_image(size if size else (100, 100), "white")
 
@@ -1572,6 +1732,7 @@ def flexible_image_compositor_updated(T):
             else:
                 canvas.paste(img, pos)
                 actual_size = size
+            img.close()
 
             # Draw subtitle if present
             if subtitle:
@@ -1587,6 +1748,7 @@ def flexible_image_compositor_updated(T):
             print(f"Image saved at {output_path}")
         else:
             canvas.show()
+        canvas.close()
 
         # Delete source files if requested
         if getattr(T, 'delete_after_concat', False):
@@ -1602,6 +1764,18 @@ def flexible_image_compositor_updated(T):
         print(f"Error in flexible_image_compositor_updated: {e}")
 
 
+def _create_grouped_frame_objects(task_group):
+    """Run a list of tasks sequentially inside a single process.
+
+    Tasks that share the same PKL file are grouped together so the file is
+    loaded only once (by the first task that actually needs it), rather than
+    N separate processes each loading it in parallel.
+    """
+    for task in task_group:
+        _create_single_frame_object(task)
+        gc.collect()
+
+
 def _create_single_frame_object(args):
     """Module-level helper for parallel frame-object creation (one process per object)."""
     frame_type, obj, sim_num, save_path, replace_frames, frames_format = args
@@ -1613,6 +1787,7 @@ def _create_single_frame_object(args):
         'GA':  create_animation_graph_multiple_frames,
         'T1A': create_animation_T1_multiple_frames,
         'Q1A': create_animation_Q1_multiple_frames,
+        'TP1A': create_animation_TP1_multiple_frames,
     }
 
     if frame_type not in frame_functions or obj is None:
@@ -1662,6 +1837,7 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
         'GA': create_animation_graph_multiple_frames,
         'T1A': create_animation_T1_multiple_frames,
         'Q1A': create_animation_Q1_multiple_frames,
+        'TP1A': create_animation_TP1_multiple_frames,
     }
 
     tasks = []
@@ -1678,8 +1854,23 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
             tasks.append((frame_type, obj, sim_num, save_path, replace_frames, frames_format))
 
     if max_parallel > 1:
+        # Group V-type tasks by (file_key_x, file_key_y) so that tasks sharing
+        # the same heavy PKL file run sequentially in ONE subprocess instead of
+        # each spawning a separate process that loads the same multi-GB file.
+        v_groups: dict[tuple, list] = {}
+        other_tasks: list[list] = []
+        for task in tasks:
+            ft, obj, *_ = task
+            if ft == 'V' and hasattr(obj, 'file_key_y'):
+                key = (getattr(obj, 'file_key_x', 'A2'), getattr(obj, 'file_key_y', 'A2'))
+                v_groups.setdefault(key, []).append(task)
+            else:
+                other_tasks.append([task])
+
+        pool_groups = list(v_groups.values()) + other_tasks
+
         with ProcessPoolExecutor(max_workers=max_parallel) as executor:
-            list(executor.map(_create_single_frame_object, tasks))
+            list(executor.map(_create_grouped_frame_objects, pool_groups))
         gc.collect()
     else:
         for task in tasks:
@@ -1761,10 +1952,10 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
 
             flexible_image_compositor_updated(T)
 
-
-            
         except Exception as e:
             print(f"Error in concatenate_multiple_images ti {ti}: {e}")
+        finally:
+            gc.collect()
 
 
     path_to_delete = [T.elements[ele_idx]['path'] for ele_idx in range(len(T.elements))]
@@ -1802,51 +1993,37 @@ def create_vid_from_frames(frame_pattern=None, output_path=None, frame_rate=50, 
         print(f"No frames found in {frame_pattern}. Make sure the images are in the correct format (frame_XXXXXX.png).")
         return
 
-    # Read first frame to get dimensions
-    first_frame = cv2.imread(frame_files[0])
-    if first_frame is None:
-        print(f"Could not read the first frame: {frame_files[0]}")
-        return
-    height, width, _ = first_frame.shape
-
-    # Create a temporary AVI file
-    with tempfile.NamedTemporaryFile(suffix=".avi", delete=False) as tmp_avi:
-        avi_path = tmp_avi.name
-
-    # Write frames to AVI using OpenCV
-    fourcc = cv2.VideoWriter_fourcc(*"XVID")  # Use XVID for AVI
-    video_writer = cv2.VideoWriter(avi_path, fourcc, frame_rate, (width, height))
-
-    for frame_file in frame_files:
-        frame = cv2.imread(frame_file)
-        if frame is None:
-            print(f"Warning: Could not read {frame_file}. Skipping.")
-            continue
-        video_writer.write(frame)
-
-    video_writer.release()
-
-    # Convert AVI to MP4 using FFmpeg
     if output_path is None:
-        output_path = os.path.splitext(avi_path)[0] + ".mp4"
+        output_path = os.path.splitext(frame_files[0])[0] + ".mp4"
 
-    ffmpeg_cmd = ["ffmpeg", "-y", "-i", avi_path]
+    # Write a concat file list so FFmpeg reads frames in sorted order without
+    # loading them into Python memory (avoids the XVID-AVI buffering OOM).
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        list_path = f.name
+        duration = 1.0 / frame_rate
+        for ff in frame_files:
+            f.write(f"file '{os.path.abspath(ff)}'\n")
+            f.write(f"duration {duration}\n")
+
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0", "-i", list_path,
+    ]
     if scale_width is not None:
         ffmpeg_cmd += ["-vf", f"scale={scale_width}:-2"]
     ffmpeg_cmd += ["-vcodec", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", output_path]
+
     try:
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         print(f"Video saved as {output_path}")
     except subprocess.CalledProcessError as e:
         print(f"FFmpeg conversion failed: {e.stderr.decode()}")
-        print(f"AVI video saved as {avi_path} (MP4 conversion failed)")
         return
-
-    # Remove temporary AVI file
-    try:
-        os.remove(avi_path)
-    except Exception as e:
-        print(f"Error deleting temporary AVI file: {e}")
+    finally:
+        try:
+            os.remove(list_path)
+        except Exception:
+            pass
 
     # Optionally delete frames and their folder
     if delete_frames:

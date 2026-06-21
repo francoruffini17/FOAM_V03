@@ -674,6 +674,172 @@ def plot_Q1_quadrangulation_mesh(
     return ax
 
 
+def plot_TP1_mesh(
+    DATA_TP1, ti,
+    ax=None,
+    figsize=(10, 8),
+    title=None,
+    show_edges=True,
+    edge_color='k',
+    linewidth=0.5,
+    show_nodes=False,
+    show_node_labels=False,
+    node_color='red',
+    node_size=10,
+    color_by_area=True,
+    custom_values=None,
+    colorbar_label=None,
+    cmap='RdYlGn',
+    vmin=None,
+    vmax=None,
+    color_limit=None,
+    face_color='lightblue',
+    face_alpha=0.7,
+    show_undeformed=False,
+    undeformed_edge_color='0.75',
+    magnification=1.0,
+    node_scale=1.0,
+    show_colorbar=True,
+):
+    """
+    Plot the TP1 FEM mesh (mixed 3/4-node elements) at a given timestep,
+    with elements coloured by A/A₀ or a custom per-element scalar.
+
+    DATA_TP1 must have the same key structure as PKL_TP1:
+    'nodes'[ti][nid_1based] = (x, y, nid), 'elements'[eid] = [n1, n2, ...] (0-based),
+    'element_types'[eid] = 3 or 4, 'elements_area_normalized'[eid][ti] = float.
+    """
+    n_ti = len(DATA_TP1['t'])
+    if ti < 0 or ti >= n_ti:
+        raise ValueError(f"ti={ti} out of range [0, {n_ti - 1}]")
+
+    node_ids = sorted(DATA_TP1['nodes'][0].keys())   # 1-based ints, sorted
+    n_nodes  = len(node_ids)
+    # Build a mapping: 1-based nid → array index
+    nid_to_idx = {nid: i for i, nid in enumerate(node_ids)}
+
+    def _deformed_xy(time_index):
+        xs = np.empty(n_nodes)
+        ys = np.empty(n_nodes)
+        for arr_idx, nid in enumerate(node_ids):
+            if magnification != 1.0:
+                x0, y0, _ = DATA_TP1['nodes'][0][nid]
+                xd, yd, _ = DATA_TP1['nodes'][time_index][nid]
+                xs[arr_idx] = (x0 + magnification * (xd - x0)) * node_scale
+                ys[arr_idx] = (y0 + magnification * (yd - y0)) * node_scale
+            else:
+                xd, yd, _ = DATA_TP1['nodes'][time_index][nid]
+                xs[arr_idx] = xd * node_scale
+                ys[arr_idx] = yd * node_scale
+        return xs, ys
+
+    elem_ids = sorted(DATA_TP1['elements'].keys())
+    n_elems  = len(elem_ids)
+    # element node indices are 0-based; convert to array indices via nid_to_idx
+    # (0-based element index n → 1-based nid = n+1 → array index = nid_to_idx[n+1])
+    elem_node_arrays = []
+    for eid in elem_ids:
+        raw = DATA_TP1['elements'][eid]   # list of 0-based node indices
+        elem_node_arrays.append([nid_to_idx[n + 1] for n in raw])
+
+    norm_areas = np.array(
+        [DATA_TP1['elements_area_normalized'][eid][ti] for eid in elem_ids],
+        dtype=float,
+    )
+
+    _custom   = np.asarray(custom_values, dtype=float) if custom_values is not None else None
+    _do_color = color_by_area or (_custom is not None)
+    _values   = _custom if _custom is not None else norm_areas
+    _cb_label = colorbar_label if colorbar_label is not None else (
+        'A / A₀' if _custom is None else ''
+    )
+
+    if _do_color:
+        if color_limit is not None:
+            import matplotlib.colors as _mcolors
+            _lim  = float(color_limit)
+            _rwb  = _mcolors.LinearSegmentedColormap.from_list('rwb_log', ['red', 'white', 'blue'])
+            norm_obj = _mcolors.LogNorm(vmin=1.0 / _lim, vmax=_lim)
+            cmap_obj = _rwb
+        else:
+            _vmin = vmin if vmin is not None else _values.min()
+            _vmax = vmax if vmax is not None else _values.max()
+            norm_obj = mcolors.Normalize(vmin=_vmin, vmax=_vmax)
+            _CUSTOM_CMAPS = {
+                'red_white'  : ['red',   'white'],
+                'white_red'  : ['white', 'red'],
+                'blue_white' : ['blue',  'white'],
+                'white_blue' : ['white', 'blue'],
+            }
+            if cmap in _CUSTOM_CMAPS:
+                cmap_obj = mcolors.LinearSegmentedColormap.from_list(cmap, _CUSTOM_CMAPS[cmap])
+            else:
+                cmap_obj = cm.get_cmap(cmap)
+        scalar_map = cm.ScalarMappable(norm=norm_obj, cmap=cmap_obj)
+        scalar_map.set_array(_values)
+        face_colors = [scalar_map.to_rgba(v, alpha=face_alpha) for v in _values]
+    else:
+        face_colors = [face_color] * n_elems
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    xs, ys = _deformed_xy(ti)
+
+    if show_undeformed and ti != 0:
+        xs0, ys0 = _deformed_xy(0)
+        segs0 = []
+        for nodes_idx in elem_node_arrays:
+            pts = [(xs0[n], ys0[n]) for n in nodes_idx]
+            pts.append(pts[0])
+            segs0.append(pts)
+        from matplotlib.collections import LineCollection as _LC
+        ax.add_collection(_LC(segs0, colors=undeformed_edge_color,
+                               linewidths=linewidth * 0.7, zorder=1))
+
+    from matplotlib.patches import Polygon
+    from matplotlib.collections import PatchCollection
+
+    patches = []
+    for nodes_idx in elem_node_arrays:
+        verts = np.array([[xs[n], ys[n]] for n in nodes_idx])
+        patches.append(Polygon(verts, closed=True))
+
+    col = PatchCollection(patches, facecolors=face_colors,
+                          edgecolors=edge_color if show_edges else 'none',
+                          linewidths=linewidth, zorder=2)
+    ax.add_collection(col)
+
+    if show_nodes:
+        ax.scatter(xs, ys, c=node_color, s=node_size, zorder=5)
+
+    if show_node_labels:
+        for arr_idx, nid in enumerate(node_ids):
+            ax.annotate(str(nid), (xs[arr_idx], ys[arr_idx]),
+                        fontsize=6, ha='center', va='bottom',
+                        textcoords='offset points', xytext=(0, 3))
+
+    if _do_color and show_colorbar:
+        fig.colorbar(scalar_map, ax=ax, label=_cb_label, shrink=0.8)
+
+    ax.autoscale_view()
+    ax.set_aspect('equal')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.grid(True, linestyle='--', alpha=0.4)
+
+    if title is None:
+        mag_str = f', mag={magnification:.0f}x' if magnification != 1.0 else ''
+        sc_str  = f', scale={node_scale:.2g}'   if node_scale  != 1.0 else ''
+        cb_str  = ', A/A₀'                       if color_by_area      else ''
+        title   = f'TP1 FEM Mesh — ti={ti}, t={DATA_TP1["t"][ti]:.4g}{mag_str}{sc_str}{cb_str}'
+    ax.set_title(title)
+
+    return ax
+
+
 # def plot_J1_graph_mesh(DATA_J1, ti, ax=None, show_node_labels=False,
 #                        bar_color='b', node_color='red', node_size=15,
 #                        linewidth=1.0, figsize=(10, 8), title=None,

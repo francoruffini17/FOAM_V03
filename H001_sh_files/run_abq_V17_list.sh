@@ -82,6 +82,8 @@ declare -A OUTPUT_OPTIONS=(
     ["K_ini"]="0"
     ["K_fin"]="0"
     ["K_alg"]="1"
+    ["TP1"]="n"
+    ["TP2"]="n"
     ["DELETE_CSV"]="n"
     ["N_WORKERS"]="1"
     ["MAX_MEMORY_GB"]="10"
@@ -185,7 +187,7 @@ process_results() {
 
     {
         printf "%s\n%s\n" "$sim_number" "$sim_number"
-        for key in A A2 B C C2 D T1 T1_ini T1_fin J1 J2 J3 J_ini J_fin J_alg H1 H2 H3 H_ini H_fin H_alg I1 I2 I3 I_ini I_fin I_alg K1 K2 K3 K_ini K_fin K_alg DELETE_CSV N_WORKERS MAX_MEMORY_GB; do
+        for key in A A2 B C C2 D T1 T1_ini T1_fin J1 J2 J3 J_ini J_fin J_alg H1 H2 H3 H_ini H_fin H_alg I1 I2 I3 I_ini I_fin I_alg K1 K2 K3 K_ini K_fin K_alg TP1 TP2 DELETE_CSV N_WORKERS MAX_MEMORY_GB; do
             printf "%s\n" "${OUTPUT_OPTIONS[$key]}"
         done
     } > "$reduce_input_file"
