@@ -62,6 +62,7 @@ class data:
     nu_Inclusions: float = None
     expansion_foam: float = 0
     expansion_Inclusions: float = 0
+    density_foam: float = None
     steps: list = field(default_factory=list)
     input_name: str = None
     initial_Temp: float = None
@@ -1079,6 +1080,9 @@ def S6(input_name,output_name, OBJ):
         file.write(f"{OBJ.E}, {OBJ.nu}\n")
         file.write(f"*Expansion\n")
         file.write(f"{OBJ.expansion_foam},\n")
+        if OBJ.density_foam is not None:
+            file.write("*Density\n")
+            file.write(f"{OBJ.density_foam},\n")
 
 
 

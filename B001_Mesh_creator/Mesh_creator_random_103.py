@@ -2,31 +2,42 @@
 Mesh_creator_random_103
 =======================
 RSA random foam mesh with right-skew hole-size distribution, porosity ≈ 0.60.
-Variant of R102 with smaller holes → more holes at the same porosity.
+Variant of R102 with more holes at the same porosity via a more strongly
+right-skewed Beta(2,5) distribution and a narrower size range.
 
 Constraints (fixed, same as R101/R102):
   min_distance_between_holes = 0.01
   edge_left/right/bottom/top = 0.01
   hole_size_distribution     = 'right_skew'
 
-Compared to R102 (min=0.04, max=0.25, s=2.5 → 56 holes):
-  Reducing max_hole from 0.25 → 0.15 and min_hole from 0.04 → 0.02 forces
-  RSA to place many more smaller holes to reach the same total void area.
-
-Empirical sweep findings (d=0.01, seed=42, target=0.60):
+Parameter sweep results (d=0.01, seed=42, target=0.60):
 
   Winning configuration:
-    min=0.02  max=0.15  s=1.5  →  achieved=0.6001  (117 holes)   ← PRIMARY
-    min=0.02  max=0.20  s=2.0  →  achieved=0.6003  ( 86 holes)   ← ALT (fewer holes, clearer skew)
-    min=0.01  max=0.20  s=2.0  →  achieved=0.6000  (100 holes)   ← ALT-B
+    min=0.01  max=0.25  s=2.5  →  achieved=0.6003  ( 81 holes)  skew=+0.47  ← PRIMARY
+                                   Beta(2,5): mode≈0.058, mean≈0.079  (placed mean≈0.092)
 
-  Beta(2,3) (s=1.5) on diameter range [0.02, 0.15]:
-    mode ≈ 0.063, mean ≈ 0.072 — peak at small sizes, right tail to 0.15.
+  Runners-up considered but not adopted:
+    min=0.02  max=0.25  s=2.5  →  achieved=0.6006  ( 68 holes)  skew=+0.33  ← fewer holes
+    min=0.02  max=0.25  s=3.0  →  achieved=0.5795  ( 95 holes)  skew=+0.46  ← just below 60 %
+
+  Configs that achieve >60 % porosity but with insufficient right skew:
+    min=0.02  max=0.15  s=1.5  →  achieved=0.6001  (117 holes)  skew=−0.03  ← PREVIOUS (symmetric)
+    min=0.02  max=0.15  s=2.0  →  achieved=0.5725  (139 holes)  skew=+0.00  ← still symmetric
+    min=0.02  max=0.20  s=2.5  →  achieved=0.5627  (112 holes)  skew=+0.34  ← doesn't reach 60 %
+
+  Root-cause note: RSA sorts pre-sampled radii largest-first and stops when
+  the target void area is reached.  This causes the placed distribution to
+  favour large holes.  With Beta(2,3) (s=1.5) the placed distribution is
+  essentially symmetric (skew ≈ −0.03).  Widening max_hole to 0.25 and
+  allowing min_hole=0.01 gives Beta(2,5) a broader range so that RSA still
+  reaches 60 % while naturally placing many more small holes (right tail of
+  the size range goes to 0.25 which pulls the distribution rightward),
+  yielding placed skew ≈ +0.47.
 
 Progression:
   R101: min=0.04, max=0.15, s=2.5  →  porosity≈0.50  (104 holes)
   R102: min=0.04, max=0.25, s=2.5  →  porosity≈0.60  ( 56 holes)  [larger holes]
-  R103: min=0.02, max=0.15, s=1.5  →  porosity≈0.60  (117 holes)  [more, smaller holes]
+  R103: min=0.01, max=0.25, s=2.5  →  porosity≈0.60  ( 81 holes)  [more, right-skewed]
 
 Output: C001_Mesh_files/R103.mesh.json
         C001_Mesh_files/R103_holes.png
@@ -45,34 +56,34 @@ from A001_functions.Hex_5 import (
 )
 
 # ---------------------------------------------------------------------------
-# PRIMARY — min=0.02, max=0.15, s=1.5  →  achieved ≈ 0.60  (117 holes)
+# PRIMARY — min=0.01, max=0.25, s=2.5  →  achieved ≈ 0.60  (81 holes, skew +0.47)
 # ---------------------------------------------------------------------------
 cfg = MeshConfigRand(
     domain_size=1.0,
     porosity=0.60,
-    min_hole_size=0.02,                   # smaller than R102 (was 0.04)
-    max_hole_size=0.15,                   # smaller than R102 (was 0.25)
-    min_distance_between_holes=0.01,      # FIXED — do not change
+    min_hole_size=0.01,                    # smaller than previous (was 0.02)
+    max_hole_size=0.25,                    # wider than previous (was 0.15)
+    min_distance_between_holes=0.01,       # FIXED — do not change
     seed=42,
-    edge_left=0.01,                       # FIXED
+    edge_left=0.01,                        # FIXED
     edge_right=0.01,
     edge_bottom=0.01,
     edge_top=0.01,
-    hole_size_distribution='right_skew',  # FIXED — Beta(2, 2*skew_strength)
-    hole_size_skew_strength=1.5,          # Beta(2,3) — right-skewed, ~117 holes
+    hole_size_distribution='right_skew',   # FIXED — Beta(2, 2*skew_strength)
+    hole_size_skew_strength=2.5,           # Beta(2,5) — clearly right-skewed, ~81 holes
     placement_algorithm='rsa',
 )
 
 # ---------------------------------------------------------------------------
-# ALT — s=2.0 with max=0.20 gives clearer skew but fewer holes (86)
+# ALT — min=0.02, max=0.25, s=3.0 gives stronger skew but only reaches 58 %
 # ---------------------------------------------------------------------------
 # cfg = MeshConfigRand(
 #     domain_size=1.0, porosity=0.60,
-#     min_hole_size=0.02, max_hole_size=0.20,
+#     min_hole_size=0.02, max_hole_size=0.25,
 #     min_distance_between_holes=0.01, seed=42,
 #     edge_left=0.01, edge_right=0.01, edge_bottom=0.01, edge_top=0.01,
 #     hole_size_distribution='right_skew',
-#     hole_size_skew_strength=2.0,
+#     hole_size_skew_strength=3.0,
 #     placement_algorithm='rsa',
 # )
 
@@ -86,7 +97,7 @@ generator, mesh = create_random_mesh(
     filepath=mesh_path,
     export_mesh=True,
     export_vtk=False,
-    show_plot=True,
+    show_plot=False,
     show_periodic_matching=False,
     allow_cut_left=False,
     allow_cut_right=False,
@@ -134,8 +145,10 @@ ax_foam.set_title(
 )
 
 # Right panel: hole diameter histogram
+from scipy.stats import skew as _skew
 mean_d = float(diameters.mean())
 std_d  = float(diameters.std())
+skew_d = float(_skew(diameters))
 ax_hist.hist(diameters, bins='auto', edgecolor='black', color='#7bafd4')
 ax_hist.axvline(mean_d, color='red', linestyle='--', linewidth=1.5,
                 label=f'mean = {mean_d:.4f}')
@@ -145,7 +158,8 @@ ax_hist.axvline(mean_d + std_d, color='orange', linestyle=':', linewidth=1.2)
 ax_hist.set_xlabel('Hole diameter')
 ax_hist.set_ylabel('Count')
 ax_hist.set_title(
-    f'Hole size distribution  (right_skew  Beta(2,3),  s={cfg.hole_size_skew_strength})'
+    f'Hole size distribution  (right_skew  Beta(2,5),  s={cfg.hole_size_skew_strength})'
+    f'\nskewness = {skew_d:.3f}'
 )
 ax_hist.legend()
 
@@ -159,4 +173,4 @@ plt.tight_layout()
 out_png = mesh_path.replace('.mesh.json', '_holes.png')
 fig.savefig(out_png, dpi=120, bbox_inches='tight')
 print(f"Hole distribution saved -> {out_png}")
-plt.show()
+plt.close(fig)
