@@ -322,8 +322,7 @@ run_video() {
 
     printf "Video: Starting for %s ...\n" "$sim"
 
-    printf "%s\n%s\n" "$sim_number" "$VIDEOS_PROPERTIES_FILES" \
-        | python -m A001_functions.Video_executor > "logs/$video_log" 2>&1
+    python -m A001_functions.Video_executor "$sim_number" "$VIDEOS_PROPERTIES_FILES" > "logs/$video_log" 2>&1
     local status=$?
 
     if [[ $status -ne 0 ]]; then

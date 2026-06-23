@@ -6,7 +6,7 @@ from .Video_functions import *
 # Usage: python -m A001_functions.Video_executor <sim_num> <properties_id> [max_parallel]
 #        python -m A001_functions.Video_executor <sim_num> <properties_id> --parallel <n>
 sim_num = int(sys.argv[1])
-file_name = f"F001_Video_properties_files/Video_properties_{sys.argv[2]}.py"
+file_name = f"{sys.argv[2]}.py"
 
 # Accept max_parallel as either a positional 3rd argument or --parallel <n> flag
 max_parallel_override = None

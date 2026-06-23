@@ -313,7 +313,7 @@ T.elements = [
         "create_frames": True,
         "type": 'GP',
         "object": FFI3002,
-        "replace_frames": True,
+        "replace_frames": False,
     },
     # ── Column 3: TP2 ─────────────────────────────────────────────────────────
     {
