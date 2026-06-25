@@ -66,7 +66,6 @@ for P in Ps:
     , 1.
     """,
         corner_xnyn_bc=[0, 0, None, None, None, None],
-        corner_xpyn_bc=[None, 0, None, None, None, None],
         Pressure_BC=P,
         time_interval_out=0.1,
         frequ_out=100,
@@ -94,7 +93,6 @@ for P in Ps:
     """,
         new_boundary=True,
         corner_xnyn_bc=[0, 0, None, None, None, None],
-        corner_xpyn_bc=[None, 0, None, None, None, None],
         BC_9999997=[None, -5, None, None, None, None],
         time_interval_out=0.005,
         frequ_out=100,

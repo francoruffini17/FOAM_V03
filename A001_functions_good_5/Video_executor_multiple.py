@@ -2,7 +2,7 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-sim_nums =  [700, 701, 702, 703, 704, 800, 801, 802, 803, 804]#6004, 6005, 6006, 6007, 6008]#4000, 4001, 4002]#, 2003, 2004]#, 2005, 2006, 2007, 2008]
+sim_nums =  [504, 604]#6004, 6005, 6006, 6007, 6008]#4000, 4001, 4002]#, 2003, 2004]#, 2005, 2006, 2007, 2008]
 
 # 1200, 1201, 1202, 1203, 1204, 1205, 1206, 1207, 1208, 1209,
             # 1210, 1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219]
@@ -27,12 +27,13 @@ def run_simulation(sim_num):
     print(f"Running simulation {sim_num}...")
     try:
         process = subprocess.Popen(
-            ["python", "-m", "A001_functions.Video_executor", str(sim_num), "F001_Video_properties_files/Video_properties_1008"],
+            ["python", "-m", "A001_functions.Video_executor"],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        stdout, stderr = process.communicate()
+        stdout, stderr = process.communicate(f"{sim_num}\nF001_Video_properties_files/Video_properties_1005\n")
         result = f"Finished simulation {sim_num}\n{'-'*40}\n"
         if stdout:
             result += stdout

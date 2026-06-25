@@ -1,26 +1,34 @@
-import sys, os, json, shutil
+"""
+SIM_870_inp_creator_random
+==========================
+Creates input decks for SIM_870, SIM_871, and SIM_872 — a mesh-convergence
+study at P = 0.32 (identical to SIM_804) using three mesh densities:
 
+  SIM_870  —  R200  (~27 000 elements, mesh_size = 0.004)
+  SIM_871  —  R201  (~15 000 elements, mesh_size = 0.0054)
+  SIM_872  —  R202  (~60 000 elements, mesh_size = 0.0027)
+
+All solver parameters (solver type, stabilization factor, BCs, outputs)
+are identical to SIM_804.
+"""
+
+import sys, os, json, shutil
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from A001_functions.abq_inp_file_creator import *
 from dataclasses import asdict
 
 
 E      = 20
+factor = 2e-5
+P      = 0.32   # same as SIM_804
 
-# Density in tonne/mm³ (unit system: mm–N–MPa–tonne).
-# ~1000 kg/m³ solid wall material → 1e-9 t/mm³.
-# For explicit dynamics; check ALLKE/ALLIE ratio post-run to confirm quasi-static behaviour.
-DENSITY = 1e-9
+SIMS = [
+    (870, 'R200.mesh.json'),
+    (871, 'R201.mesh.json'),
+    (872, 'R202.mesh.json'),
+]
 
-sim_num = 760
-
-mesh_file = 'A200.mesh.json'
-
-
-Ps = [0, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12]
-
-
-for P in Ps:
+for sim_num, mesh_file in SIMS:
     os.makedirs('I001_Results/OBJ_files', exist_ok=True)
 
     path = f'E001_Simulations/SIM_{sim_num:03d}'
@@ -32,10 +40,10 @@ for P in Ps:
             print(f"Folder '{path}' was replaced.")
         else:
             print("Operation cancelled. Folder was not replaced.")
+            continue
     else:
         os.makedirs(path)
         print(f"Folder '{path}' was created.")
-
 
     OBJ = data()
     OBJ.input_name   = f'C001_Mesh_files/{mesh_file}'
@@ -47,12 +55,9 @@ for P in Ps:
     OBJ.nu           = 0.3
     OBJ.t            = 1
     OBJ.ELE_TYPE_3   = "CPS3"
-    OBJ.ELE_TYPE_4   = "CPS4R"
-    OBJ.density_foam = DENSITY
+    OBJ.ELE_TYPE_4   = "CPS4"
     OBJ.fluid_cavity = """*Molecular Weight
-        28.0e-6
-*Capacity, type=POLYNOMIAL
-        29099,"""
+        28.0e-6"""
     OBJ.physical_constants = "*Physical Constants, absolute zero=0, universal gas=8314"
     OBJ.gas_present        = True
     OBJ.fluid_cavity_ratio = 1.0
@@ -62,11 +67,12 @@ for P in Ps:
     step0 = StepData(
         name="Step-0",
         solver=f"""**
-    *Step, name=Step-0, nlgeom=YES
-    *Dynamic, Explicit
-    , 1.
+    *Step, name=Step-0, nlgeom=YES, inc=99999, unsymm=YES
+    *Static, stabilize, factor={factor}, continue=NO
+    1e-5, 1., 1e-99, 0.1
     """,
         corner_xnyn_bc=[0, 0, None, None, None, None],
+        corner_xpyn_bc=[None, 0, None, None, None, None],
         Pressure_BC=P,
         time_interval_out=0.1,
         frequ_out=100,
@@ -88,12 +94,13 @@ for P in Ps:
     step1 = StepData(
         name="Step-1",
         solver=f"""**
-    *Step, name=Step-1, nlgeom=YES
-    *Dynamic, Explicit
-    , 1.
+    *Step, name=Step-1, nlgeom=YES, inc=99999, unsymm=YES
+    *Static, stabilize, factor={factor}, continue=NO
+    1e-5, 1., 1e-99, 0.01
     """,
         new_boundary=True,
         corner_xnyn_bc=[0, 0, None, None, None, None],
+        corner_xpyn_bc=[None, 0, None, None, None, None],
         BC_9999997=[None, -5, None, None, None, None],
         time_interval_out=0.005,
         frequ_out=100,
@@ -120,4 +127,3 @@ for P in Ps:
 
     print(sim_num)
     S6(OBJ.input_name, OBJ.input, OBJ)
-    sim_num += 1

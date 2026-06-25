@@ -14,7 +14,6 @@ from A001_functions.Hex_5 import (read_graph_mesh, map_undeformed_to_deformed,
     _map_physical_to_natural_tri, _point_in_tri, _dist_outside_tri,
     _shape_functions_tri, read_mesh_json)
 from A001_functions.fem_stress_interpolation import interpolate_stress
-from A001_functions.compute_DEFC import create_PKL_DEFC1, create_PKL_DEFC2
 from scipy.spatial import cKDTree
 from scipy.linalg import fractional_matrix_power
 from numba import jit
@@ -3632,7 +3631,7 @@ def process_simulation(args):
     """Processes a single simulation based on input arguments."""
 
     try:
-        i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, in_DEFC1, in_DEFC2, delete_csv, n_workers, max_memory_gb = args
+        i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, delete_csv, n_workers, max_memory_gb = args
         
         csv_file = f'I001_Results/RES_SIM_{i:03}.csv'
 
@@ -4219,29 +4218,6 @@ def process_simulation(args):
                 except Exception as e:
                     print(f"Error processing TP2 for simulation {i:03d}: {e}")
 
-        if in_DEFC1 in ('y', 'Y'):
-            try:
-                data_DEFC1 = create_PKL_DEFC1(sim_num=i)
-
-                if in_DEFC2 in ('y', 'Y'):
-                    try:
-                        create_PKL_DEFC2(data_DEFC1, sim_num=i)
-                    except Exception as e:
-                        print(f"Error processing DEFC2 for simulation {i:03d}: {e}")
-
-                del data_DEFC1
-            except Exception as e:
-                print(f"Error processing DEFC1 for simulation {i:03d}: {e}")
-
-        elif in_DEFC2 in ('y', 'Y'):
-            defc1_path = f'I001_Results/DATA_PICK_{i:03}_DEFC1.pkl'
-            data_DEFC1 = _load_pickle_or_skip(defc1_path, f"DEFC2 for simulation {i:03d}")
-            if data_DEFC1 is not None:
-                try:
-                    create_PKL_DEFC2(data_DEFC1, sim_num=i)
-                    del data_DEFC1
-                except Exception as e:
-                    print(f"Error processing DEFC2 for simulation {i:03d}: {e}")
 
         if delete_csv in ('y','Y'):
             if os.path.exists(csv_file):
@@ -4297,8 +4273,6 @@ if __name__ == "__main__":
     Q_fin = input('Final Q index: ') or '0'
     in_TP1 = input('Output file TP1? (y/n): ') or 'n'
     in_TP2 = input('Output file TP2? (y/n): ') or 'n'
-    in_DEFC1 = input('Output file DEFC1? (y/n): ') or 'n'
-    in_DEFC2 = input('Output file DEFC2? (y/n): ') or 'n'
     delete_csv = input('Delete csv? (y/n): ') or 'n'
     n_workers_str = input('Number of parallel workers for G2_exact (default=auto): ') or '0'
     max_memory_gb_str = input('Max memory in GB for G2_exact (default=auto): ') or '0'
@@ -4323,7 +4297,7 @@ if __name__ == "__main__":
     K_alg = None if K_alg == '1' else 'bfs'
 
     # Prepare arguments for multiprocessing
-    args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, in_DEFC1, in_DEFC2, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
+    args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
 
     # Use multiprocessing to process simulations in parallel
     with multiprocessing.Pool() as pool:
