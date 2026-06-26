@@ -116,6 +116,8 @@ declare -A OUTPUT_OPTIONS=(
     ["Q_fin"]="0"
     ["TP1"]="n"
     ["TP2"]="n"
+    ["DEFC1"]="n"
+    ["DEFC2"]="n"
     ["DELETE_CSV"]="n"
     ["N_WORKERS"]="1"
     ["MAX_MEMORY_GB"]="10"
@@ -256,14 +258,16 @@ process_results() {
     local reduce_input_file="reduce_inputs_${sim_number}.txt"
 
     printf "%s\n%s\nI001_Results\n%s\n" "$sim_number" "$sim_number" "$DELETE_ODB" | "$ABQ_CMD" python "$FUNCTIONS_DIR/abq_scriptV9.py" > "$log_folder/SIM_${sim_number}.log" 2>&1
+    local abq_status=$?
 
-    if [[ ! -f "I001_Results/RES_SIM_${sim_number}.csv" ]]; then
-        printf "Error: Expected results file RES_SIM_%s.csv was not created.\n" "$sim_number" >&2
+    if [[ $abq_status -ne 0 ]] || [[ ! -f "I001_Results/RES_SIM_${sim_number}.csv" ]]; then
+        printf "Error: ABQ extraction for %s failed (status=%d). Skipping reduce.\n" "$sim_number" "$abq_status" >&2
+        return 1
     fi
 
     {
         printf "%s\n%s\n" "$sim_number" "$sim_number"
-        for key in A A2 B C C2 D T1 T2 T1_ini T1_fin J1 J2 J3 J_ini J_fin J_alg H1 H2 H3 H_ini H_fin H_alg I1 I2 I3 I_ini I_fin I_alg K1 K2 K3 K_ini K_fin K_alg Q1 Q2 Q_ini Q_fin TP1 TP2 DELETE_CSV N_WORKERS MAX_MEMORY_GB; do
+        for key in A A2 B C C2 D T1 T2 T1_ini T1_fin J1 J2 J3 J_ini J_fin J_alg H1 H2 H3 H_ini H_fin H_alg I1 I2 I3 I_ini I_fin I_alg K1 K2 K3 K_ini K_fin K_alg Q1 Q2 Q_ini Q_fin TP1 TP2 DEFC1 DEFC2 DELETE_CSV N_WORKERS MAX_MEMORY_GB; do
             printf "%s\n" "${OUTPUT_OPTIONS[$key]}"
         done
     } > "$reduce_input_file"
@@ -310,29 +314,13 @@ start_simulation() {
 
     (
         if run_simulation "$sim"; then
-            queue_processing "$sim"
+            process_results "$sim"
         else
             printf "Skipping result processing for %s because the simulation failed.\n" "$sim" >&2
         fi
     ) &
     RUNNING_SIM_PIDS+=("$!")
     SIMS_RUN+=("$sim")
-}
-
-queue_processing() {
-    local sim="$1"
-
-    local sim_path="$SIMS_DIR/$sim"
-
-    if [[ ! -d "$sim_path" ]]; then
-        printf "Warning: Simulation directory %s does not exist for processing. Skipping queue.\n" "$sim_path" >&2
-        return
-    fi
-
-    (
-        process_results "$sim"
-    ) &
-    PROCESS_PIDS+=("$!")
 }
 
 get_next_sim_to_run() {
@@ -387,15 +375,7 @@ main() {
         done
         RUNNING_SIM_PIDS=("${new_running[@]}")
 
-        local new_processing=()
-        for pid in "${PROCESS_PIDS[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                new_processing+=("$pid")
-            fi
-        done
-        PROCESS_PIDS=("${new_processing[@]}")
-
-        if [[ "${#RUNNING_SIM_PIDS[@]}" -eq 0 && "${#PROCESS_PIDS[@]}" -eq 0 ]]; then
+        if [[ "${#RUNNING_SIM_PIDS[@]}" -eq 0 ]]; then
             local check_more=""
             if ! check_more=$(grep -E '^[0-9]+$' "$SIMLIST_FILE"); then
                 break
@@ -412,7 +392,6 @@ main() {
 }
 
 declare -a RUNNING_SIM_PIDS=()
-declare -a PROCESS_PIDS=()
 declare -a SIMS_RUN=()
 declare -a SIMS_QUEUED=()
 declare NEXT_SIM_NAME=""

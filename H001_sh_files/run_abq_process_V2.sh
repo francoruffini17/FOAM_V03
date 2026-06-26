@@ -28,6 +28,45 @@ cd "$ROOT_DIR" || { printf "Error: Cannot cd to repo root %s\n" "$ROOT_DIR" >&2;
 export PYTHONPATH="$FUNCTIONS_DIR:$ROOT_DIR:${PYTHONPATH:-}"
 
 # ---------------------------------------------------------------------------
+# Abaqus command resolution
+# ---------------------------------------------------------------------------
+ABQ_CMD="${ABQ_CMD:-}"
+
+resolve_abq_cmd() {
+    local candidate resolved
+
+    if [[ -n "$ABQ_CMD" ]]; then
+        if [[ -x "$ABQ_CMD" ]]; then
+            return 0
+        fi
+        if resolved="$(command -v "$ABQ_CMD" 2>/dev/null)"; then
+            ABQ_CMD="$resolved"
+            return 0
+        fi
+        printf "Error: Abaqus command '%s' was not found or is not executable.\n" "$ABQ_CMD" >&2
+        return 1
+    fi
+
+    for candidate in \
+        "abq" \
+        "/var/DassaultSystemes/SIMULIA/Commands/abq" \
+        "abaqus"
+    do
+        if [[ -x "$candidate" ]]; then
+            ABQ_CMD="$candidate"
+            return 0
+        fi
+        if resolved="$(command -v "$candidate" 2>/dev/null)"; then
+            ABQ_CMD="$resolved"
+            return 0
+        fi
+    done
+
+    printf "Error: Abaqus command not found. Try passing ABQ_CMD=/path/to/abq.\n" >&2
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
@@ -211,6 +250,9 @@ for arg in "$@"; do
         MAX_MEMORY_GB)
             [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] && OUTPUT_OPTIONS[MAX_MEMORY_GB]="$value" || printf "Warning: Ignoring invalid MAX_MEMORY_GB=%s\n" "$value" >&2
             ;;
+        ABQ_CMD)
+            ABQ_CMD="$value"
+            ;;
         *)
             if [[ -n "${OUTPUT_OPTIONS[$key]+_}" ]]; then
                 OUTPUT_OPTIONS[$key]="$value"
@@ -227,6 +269,11 @@ done
 if [[ "$RUN_ABQ" == "n" && "$RUN_REDUCE" == "n" && "$RUN_VIDEO" == "n" ]]; then
     printf "Error: No processing steps enabled. Set at least one of RUN_ABQ=y, RUN_REDUCE=y, or RUN_VIDEO=y.\n" >&2
     exit 1
+fi
+
+if [[ "$RUN_ABQ" == "y" ]]; then
+    resolve_abq_cmd || exit 1
+    printf "Using Abaqus command: %s\n" "$ABQ_CMD"
 fi
 
 # ---------------------------------------------------------------------------
@@ -273,7 +320,7 @@ run_abq_extraction() {
     printf "ABQ extraction: Starting for %s ...\n" "$sim"
 
     printf "%s\n%s\nI001_Results\n%s\n" "$sim_number" "$sim_number" "$DELETE_ODB" \
-        | abq python "$FUNCTIONS_DIR/abq_scriptV9.py" > "$log_folder/SIM_${sim_number}.log" 2>&1
+        | "$ABQ_CMD" python "$FUNCTIONS_DIR/abq_scriptV9.py" > "$log_folder/SIM_${sim_number}.log" 2>&1
     local status=$?
 
     if [[ $status -ne 0 ]]; then

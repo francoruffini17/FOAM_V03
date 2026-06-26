@@ -1081,7 +1081,7 @@ def create_PKL_T1(
 # ---------------------------------------------------------------------------
 
 def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
-                  w_param_sets: list = None) -> dict:
+                  w_param_sets: list = None, step1_start_ti: int = 0) -> dict:
     """
     Compute statistical summary of element areas from a PKL_T1 dictionary.
 
@@ -1413,6 +1413,36 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
     _area0_sum = float(sum(_area0.values()))
     if _area0_sum <= 1e-30:
         _area0_sum = 1e-30
+
+    shear_mean_aw = [
+        float(sum(shear[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+    gle_mean_aw = [
+        float(sum(gle[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+    edi_mean_aw = [
+        float(sum(edi[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+
+    # Se[eid][ti] = shear[eid][ti] * A(ti) / A(step1_start_ti)
+    _area_s1_ref = {eid: max(float(DATA_T1['elements_area'][eid][step1_start_ti]), 1e-30)
+                    for eid in elem_ids}
+    Se = {
+        eid: {
+            ti: shear[eid][ti] * areas_mat[ei, ti] / _area_s1_ref[eid]
+            for ti in range(n_t)
+        }
+        for ei, eid in enumerate(elem_ids)
+    }
+    _stdi_shear = (0.5 * np.sqrt(n_elems / (n_elems - 1))) if n_elems > 1 else 1.0
+    eta_shear = [
+        float(1.0 - np.std([Se[eid][ti] for eid in elem_ids]) / _stdi_shear)
+        for ti in range(n_t)
+    ]
+
     W = {
         params: [
             float(sum(w[params][eid][ti] * _area0[eid] for eid in elem_ids))
@@ -1469,10 +1499,15 @@ def create_PKL_T2(DATA_T1: dict, output_path: str = None, sim_num: int = None,
         'F'          : F_grad,
         'shear'      : shear,
         'gle'        : gle,
-        'shear_mean' : shear_mean,
-        'gle_mean'   : gle_mean,
-        'edi'        : edi,
-        'edi_mean'   : edi_mean,
+        'shear_mean'    : shear_mean,
+        'gle_mean'      : gle_mean,
+        'shear_mean_aw' : shear_mean_aw,
+        'gle_mean_aw'   : gle_mean_aw,
+        'edi'           : edi,
+        'edi_mean'      : edi_mean,
+        'edi_mean_aw'   : edi_mean_aw,
+        'Se'         : Se,
+        'eta_shear'  : eta_shear,
         'J'          : J_det,
         'C'          : C_iso,
         'w'          : w,
@@ -1675,7 +1710,7 @@ def create_PKL_Q1(
 # ---------------------------------------------------------------------------
 
 def create_PKL_Q2(DATA_Q1: dict, output_path: str = None, sim_num: int = None,
-                  w_param_sets: list = None) -> dict:
+                  w_param_sets: list = None, step1_start_ti: int = 0) -> dict:
     """
     Compute statistical summary of element data from a PKL_Q1 dictionary.
 
@@ -1903,6 +1938,36 @@ def create_PKL_Q2(DATA_Q1: dict, output_path: str = None, sim_num: int = None,
 
     _area0     = {eid: float(DATA_Q1['elements_area'][eid][0]) for eid in elem_ids}
     _area0_sum = max(float(sum(_area0.values())), 1e-30)
+
+    shear_mean_aw = [
+        float(sum(shear[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+    gle_mean_aw = [
+        float(sum(gle[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+    edi_mean_aw = [
+        float(sum(edi[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+
+    # Se[eid][ti] = shear[eid][ti] * A(ti) / A(step1_start_ti)
+    _area_s1_ref = {eid: max(float(DATA_Q1['elements_area'][eid][step1_start_ti]), 1e-30)
+                    for eid in elem_ids}
+    Se = {
+        eid: {
+            ti: shear[eid][ti] * areas_mat[ei, ti] / _area_s1_ref[eid]
+            for ti in range(n_t)
+        }
+        for ei, eid in enumerate(elem_ids)
+    }
+    _stdi_shear = (0.5 * np.sqrt(n_elems / (n_elems - 1))) if n_elems > 1 else 1.0
+    eta_shear = [
+        float(1.0 - np.std([Se[eid][ti] for eid in elem_ids]) / _stdi_shear)
+        for ti in range(n_t)
+    ]
+
     W = {
         params: [float(sum(w[params][eid][ti] * _area0[eid] for eid in elem_ids)) for ti in range(n_t)]
         for params in _w_param_sets
@@ -1942,10 +2007,15 @@ def create_PKL_Q2(DATA_Q1: dict, output_path: str = None, sim_num: int = None,
         'F'          : F_grad,
         'shear'      : shear,
         'gle'        : gle,
-        'shear_mean' : shear_mean,
-        'gle_mean'   : gle_mean,
-        'edi'        : edi,
-        'edi_mean'   : edi_mean,
+        'shear_mean'    : shear_mean,
+        'gle_mean'      : gle_mean,
+        'shear_mean_aw' : shear_mean_aw,
+        'gle_mean_aw'   : gle_mean_aw,
+        'edi'           : edi,
+        'edi_mean'      : edi_mean,
+        'edi_mean_aw'   : edi_mean_aw,
+        'Se'         : Se,
+        'eta_shear'  : eta_shear,
         'J'          : J_det,
         'C'          : C_iso,
         'w'          : w,
@@ -2098,7 +2168,7 @@ def create_PKL_TP1(DATA_C2: dict, sim_num: int, output_path: str = None) -> dict
 # ---------------------------------------------------------------------------
 
 def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
-                   w_param_sets: list = None) -> dict:
+                   w_param_sets: list = None, step1_start_ti: int = 0) -> dict:
     """
     Compute statistical summary of element data from a PKL_TP1 dictionary.
 
@@ -2350,6 +2420,36 @@ def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
 
     _area0     = {eid: float(DATA_TP1['elements_area'][eid][0]) for eid in elem_ids}
     _area0_sum = max(float(sum(_area0.values())), 1e-30)
+
+    shear_mean_aw = [
+        float(sum(shear[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+    gle_mean_aw = [
+        float(sum(gle[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+    edi_mean_aw = [
+        float(sum(edi[eid][ti] * _area0[eid] for eid in elem_ids) / _area0_sum)
+        for ti in range(n_t)
+    ]
+
+    # Se[eid][ti] = shear[eid][ti] * A(ti) / A(step1_start_ti)
+    _area_s1_ref = {eid: max(float(DATA_TP1['elements_area'][eid][step1_start_ti]), 1e-30)
+                    for eid in elem_ids}
+    Se = {
+        eid: {
+            ti: shear[eid][ti] * areas_mat[ei, ti] / _area_s1_ref[eid]
+            for ti in range(n_t)
+        }
+        for ei, eid in enumerate(elem_ids)
+    }
+    _stdi_shear = (0.5 * np.sqrt(n_elems / (n_elems - 1))) if n_elems > 1 else 1.0
+    eta_shear = [
+        float(1.0 - np.std([Se[eid][ti] for eid in elem_ids]) / _stdi_shear)
+        for ti in range(n_t)
+    ]
+
     W = {
         params: [float(sum(w[params][eid][ti] * _area0[eid] for eid in elem_ids)) for ti in range(n_t)]
         for params in _w_param_sets
@@ -2389,10 +2489,15 @@ def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
         'F'          : F_grad,
         'shear'      : shear,
         'gle'        : gle,
-        'shear_mean' : shear_mean,
-        'gle_mean'   : gle_mean,
-        'edi'        : edi,
-        'edi_mean'   : edi_mean,
+        'shear_mean'    : shear_mean,
+        'gle_mean'      : gle_mean,
+        'shear_mean_aw' : shear_mean_aw,
+        'gle_mean_aw'   : gle_mean_aw,
+        'edi'           : edi,
+        'edi_mean'      : edi_mean,
+        'edi_mean_aw'   : edi_mean_aw,
+        'Se'         : Se,
+        'eta_shear'  : eta_shear,
         'J'          : J_det,
         'C'          : C_iso,
         'w'          : w,
