@@ -74,6 +74,8 @@ class data:
     scale_x: float = 1.0
     scale_y: float = 1.0
     periodic: str = 'none'
+    explicit_dummy_node_mass: float = None
+    bc_amplitude: str = None
 
 
 
@@ -136,11 +138,19 @@ def write_step_block(file,
         Lz_min = 0
         DLz = 0
 
+    # Pre-compute amplitude settings for 9999997 BC
+    _bc_amp = getattr(OBJ, 'bc_amplitude', None)
+    _has_9999997_bc = any(v is not None for v in step.BC_9999997)
+    # When amplitude is active and this step has a 9999997 BC, embed amplitude in the
+    # *Boundary header so all BCs share one block (Explicit forbids mixing op=NEW/MOD).
+    # Corner pins have value=0 so amplitude×0=0 — they remain fixed regardless.
+    _amp_suffix = f", amplitude=Amp-Explicit" if (_has_9999997_bc and _bc_amp is not None) else ""
+
     # Face BCs (x/y/z ±)
     if step.new_boundary is True:
-        file.write("*Boundary, op=NEW\n")
+        file.write(f"*Boundary, op=NEW{_amp_suffix}\n")
     else:
-        file.write("*Boundary\n")
+        file.write(f"*Boundary{_amp_suffix}\n")
 
     for i in range(6):
         if step.BC_x_n[i] is not None:
@@ -153,7 +163,7 @@ def write_step_block(file,
             file.write(f"Set-y-negative, {i+1}, {i+1}, {step.BC_y_n[i]}\n")
 
         if step.BC_y_p[i] is not None:
-            
+
             file.write(f"Set-y-positive, {i+1}, {i+1}, {step.BC_y_p[i]}\n")
 
         if dim_nodes == 3:
@@ -177,7 +187,7 @@ def write_step_block(file,
         if (step.corner_xpyp_bc[i] is not None) and (corner_xpyp is not None):
             file.write(f"Part-1-1.{corner_xpyp}, {i+1}, {i+1}, {step.corner_xpyp_bc[i]}\n")
 
-    # Dummy node 9999997 BCs (DA=DOF1, DB=DOF2)
+    # Dummy node 9999997 BCs — always in this block
     for i in range(6):
         if step.BC_9999997[i] is not None:
             file.write(f"PERN-9999997, {i+1}, {i+1}, {step.BC_9999997[i]}\n")
@@ -200,7 +210,7 @@ def write_step_block(file,
             # extract number after last hyphen
             idx = int(name.split("-")[-1])
             hole_items.append((idx, x, y))
-            file.write(f"SET-{idx} , 8, 8, {step.Pressure_BC}\n")       
+            file.write(f"SET-{idx} , 8, 8, {step.Pressure_BC}\n")
 
         file.write(f"** \n")
 
@@ -674,7 +684,17 @@ def S6(input_name,output_name, OBJ):
         file.write(f"9999997, 0., 0.,\n")
         file.write(f"9999998, 0., 0.,\n")
         file.write(f"9999999, 0., 0.,\n")
-            
+
+        # Concentrated mass elements for dummy nodes (required for Abaqus Explicit)
+        if getattr(OBJ, 'explicit_dummy_node_mass', None) is not None:
+            m = OBJ.explicit_dummy_node_mass
+            file.write("*Element, type=MASS, elset=DUMMY-MASS-SET\n")
+            file.write("10000000, 9999997\n")
+            file.write("10000001, 9999998\n")
+            file.write("10000002, 9999999\n")
+            file.write("*Mass, elset=DUMMY-MASS-SET\n")
+            file.write(f"{m},\n")
+
         # Create surface for each hole
         for surf_name, entries in holes_surfaces.items():
             file.write(f"*Surface, name={surf_name}, type=element\n")
@@ -1072,6 +1092,11 @@ def S6(input_name,output_name, OBJ):
         file.write("*End Assembly\n")
         file.write("** \n")
 
+        if getattr(OBJ, 'bc_amplitude', None) is not None:
+            file.write("** AMPLITUDE\n")
+            file.write(f"*Amplitude, name=Amp-Explicit, definition={OBJ.bc_amplitude}\n")
+            file.write("0., 0., 1., 1.\n")
+            file.write("** \n")
 
         file.write("** MATERIALS\n")
         file.write("** \n")
