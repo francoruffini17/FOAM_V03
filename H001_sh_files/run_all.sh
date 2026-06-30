@@ -121,6 +121,7 @@ Video options:
 
 Other options:
   MOVE_FOLDER=y|n       Move simulation folder after all steps (default: n)
+  MOVE_DEST=<path>      Destination directory for moved folders (default: /data/Franco/E001_Simulations_completed)
   ABQ_CMD=<path>        Override Abaqus executable path
   -delay=N              Seconds to wait between starting consecutive simulations (default: 120, 0 = no delay)
 EOF
@@ -174,6 +175,7 @@ START_DELAY=120
 CPUS=1
 DELETE_ODB="n"
 MOVE_FOLDER="n"
+MOVE_DEST=""
 VIDEOS_PROPERTIES_FILES="Video_properties0001"
 
 declare -A OUTPUT_OPTIONS=(
@@ -280,6 +282,9 @@ for arg in "$@"; do
         MOVE_FOLDER)
             [[ "$value" == "y" || "$value" == "n" ]] && MOVE_FOLDER="$value" \
                 || printf "Warning: Ignoring invalid MOVE_FOLDER=%s\n" "$value" >&2
+            ;;
+        MOVE_DEST)
+            MOVE_DEST="$value"
             ;;
         VIDEOS_PROPERTIES_FILES)
             VIDEOS_PROPERTIES_FILES="$value"
@@ -468,7 +473,12 @@ move_folder() {
         return 1
     fi
 
-    local target_dir="/data/Franco/$(basename "$(dirname "$realpath_sim")")_completed"
+    local target_dir
+    if [[ -n "$MOVE_DEST" ]]; then
+        target_dir="$MOVE_DEST"
+    else
+        target_dir="/data/Franco/$(basename "$(dirname "$realpath_sim")")_completed"
+    fi
     local dest_dir="$target_dir/SIM_${sim_number}"
 
     mkdir -p "$target_dir"
@@ -512,23 +522,33 @@ process_simulation() {
         fi
     fi
 
+    local all_ok=0
+
     # --- Reduce results ---
     if [[ "$RUN_REDUCE" == "y" ]]; then
         acquire_semaphore sem_red
         run_reduce "$sim"
+        local red_status=$?
         release_semaphore sem_red
+        [[ $red_status -ne 0 ]] && all_ok=1
     fi
 
     # --- Video creation ---
     if [[ "$RUN_VIDEO" == "y" ]]; then
         acquire_semaphore sem_vid
         run_video "$sim"
+        local vid_status=$?
         release_semaphore sem_vid
+        [[ $vid_status -ne 0 ]] && all_ok=1
     fi
 
-    # --- Move folder ---
+    # --- Move folder only if all enabled steps succeeded ---
     if [[ "$MOVE_FOLDER" == "y" ]]; then
-        move_folder "$sim"
+        if [[ $all_ok -eq 0 ]]; then
+            move_folder "$sim"
+        else
+            printf "Warning: Skipping move for %s due to processing errors.\n" "$sim" >&2
+        fi
     fi
 }
 

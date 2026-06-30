@@ -11,7 +11,7 @@ factor    = 2e-5
 sim_num   = 1030
 mesh_file = 'R1000.mesh.json'
 
-Ps = [0.0] + [0.004 * (np.sqrt(2) ** i) for i in range(9)]
+Ps = [0.0] + [0.04 * (np.sqrt(2) ** i) for i in range(9)]
 
 
 for P in Ps:

@@ -112,6 +112,8 @@ Video options:
 
 Other options:
   MOVE_FOLDER=y|n       Move simulation folder after processing (default: n)
+  MOVE_DEST=<path>      Destination directory for moved simulation folders
+                        (default: /data/Franco/E001_Simulations_completed)
 EOF
     exit 1
 }
@@ -153,6 +155,7 @@ PAR_VID=1
 
 DELETE_ODB="n"
 MOVE_FOLDER="n"
+MOVE_DEST=""
 VIDEOS_PROPERTIES_FILES="Video_properties0001"
 
 declare -A OUTPUT_OPTIONS=(
@@ -241,6 +244,9 @@ for arg in "$@"; do
         MOVE_FOLDER)
             [[ "$value" == "y" || "$value" == "n" ]] && MOVE_FOLDER="$value" || printf "Warning: Ignoring invalid MOVE_FOLDER=%s\n" "$value" >&2
             ;;
+        MOVE_DEST)
+            MOVE_DEST="$value"
+            ;;
         VIDEOS_PROPERTIES_FILES)
             VIDEOS_PROPERTIES_FILES="$value"
             ;;
@@ -325,12 +331,14 @@ run_abq_extraction() {
 
     if [[ $status -ne 0 ]]; then
         printf "Error: ABQ extraction for %s failed. See logs/SIM_%s.log\n" "$sim" "$sim_number" >&2
+        return "$status"
     elif [[ ! -f "I001_Results/RES_SIM_${sim_number}.csv" ]]; then
         printf "Error: Expected results file RES_SIM_%s.csv was not created.\n" "$sim_number" >&2
+        return 1
     else
         printf "ABQ extraction: %s completed successfully.\n" "$sim"
     fi
-    return "$status"
+    return 0
 }
 
 run_reduce() {
@@ -400,7 +408,12 @@ move_folder() {
         return 1
     fi
 
-    local target_dir="/data/Franco/$(basename "$(dirname "$realpath_sim")")_completed"
+    local target_dir
+    if [[ -n "$MOVE_DEST" ]]; then
+        target_dir="$MOVE_DEST"
+    else
+        target_dir="/data/Franco/$(basename "$(dirname "$realpath_sim")")_completed"
+    fi
     local dest_dir="$target_dir/SIM_${sim_number}"
 
     mkdir -p "$target_dir"
@@ -419,31 +432,42 @@ move_folder() {
 # ---------------------------------------------------------------------------
 process_simulation() {
     local sim="$1"
+    local all_ok=0
 
     # --- ABQ extraction (needs simulation directory) ---
     if [[ "$RUN_ABQ" == "y" ]]; then
         acquire_semaphore sem_abq
         run_abq_extraction "$sim"
+        local abq_status=$?
         release_semaphore sem_abq
+        [[ $abq_status -ne 0 ]] && all_ok=1
     fi
 
     # --- Reduce results (works from simulation number, no directory needed) ---
     if [[ "$RUN_REDUCE" == "y" ]]; then
         acquire_semaphore sem_red
         run_reduce "$sim"
+        local red_status=$?
         release_semaphore sem_red
+        [[ $red_status -ne 0 ]] && all_ok=1
     fi
 
     # --- Video creation (works from simulation number, no directory needed) ---
     if [[ "$RUN_VIDEO" == "y" ]]; then
         acquire_semaphore sem_vid
         run_video "$sim"
+        local vid_status=$?
         release_semaphore sem_vid
+        [[ $vid_status -ne 0 ]] && all_ok=1
     fi
 
-    # --- Move folder (needs simulation directory) ---
+    # --- Move folder only if all enabled steps succeeded ---
     if [[ "$MOVE_FOLDER" == "y" ]]; then
-        move_folder "$sim"
+        if [[ $all_ok -eq 0 ]]; then
+            move_folder "$sim"
+        else
+            printf "Warning: Skipping move for %s due to processing errors.\n" "$sim" >&2
+        fi
     fi
 }
 

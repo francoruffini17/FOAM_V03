@@ -38,7 +38,7 @@ if ! conda activate Fenv; then
 fi
 
 if [[ "$#" -lt 2 ]]; then
-    printf "Usage: %s simlist.txt max_parallel_jobs [OPTION=VALUE ...]\n" "$0" >&2
+    printf "Usage: %s simlist.txt max_parallel_jobs [OPTION=VALUE ...]\n  Options: cpus=N DELETE_ODB=y|n RUN_VIDEO=y|n MOVE_FOLDER=y|n MOVE_DEST=<path> VIDEOS_PROPERTIES_FILES=<name> ABQ_CMD=<path> + all reduce output flags\n" "$0" >&2
     exit 1
 fi
 
@@ -78,7 +78,7 @@ fi
 declare -A OUTPUT_OPTIONS=(
     ["A"]="y"
     ["A2"]="y"
-    ["B"]="n"
+    ["B"]="y"
     ["C"]="y"
     ["C2"]="y"
     ["D"]="y"
@@ -126,15 +126,16 @@ declare -A OUTPUT_OPTIONS=(
 CPUS=15
 ABQ_CMD="${ABQ_CMD:-}"
 DELETE_ODB="n"
-CREATE_VIDEO="n"
+RUN_VIDEO="n"
 MOVE_FOLDER="n"
+MOVE_DEST=""
 VIDEOS_PROPERTIES_FILES="Video_properties0001"
 
 for arg in "$@"; do
     key="${arg%%=*}"
     value="${arg#*=}"
 
-    if [[ -n "${OUTPUT_OPTIONS[$key]}" ]]; then
+    if [[ -n "${OUTPUT_OPTIONS[$key]+_}" ]]; then
         OUTPUT_OPTIONS[$key]="$value"
     elif [[ "$key" == "cpus" && "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]]; then
         CPUS="$value"
@@ -142,16 +143,14 @@ for arg in "$@"; do
         ABQ_CMD="$value"
     elif [[ "$key" == "DELETE_ODB" && ("$value" == "y" || "$value" == "n") ]]; then
         DELETE_ODB="$value"
-    elif [[ "$key" == "CREATE_VIDEO" && ("$value" == "y" || "$value" == "n") ]]; then
-        CREATE_VIDEO="$value"
+    elif [[ "$key" == "RUN_VIDEO" && ("$value" == "y" || "$value" == "n") ]]; then
+        RUN_VIDEO="$value"
     elif [[ "$key" == "MOVE_FOLDER" && ("$value" == "y" || "$value" == "n") ]]; then
         MOVE_FOLDER="$value"
+    elif [[ "$key" == "MOVE_DEST" ]]; then
+        MOVE_DEST="$value"
     elif [[ "$key" == "VIDEOS_PROPERTIES_FILES" ]]; then
         VIDEOS_PROPERTIES_FILES="$value"
-    elif [[ "$key" == "N_WORKERS" && "$value" =~ ^[0-9]+$ ]]; then
-        OUTPUT_OPTIONS[N_WORKERS]="$value"
-    elif [[ "$key" == "MAX_MEMORY_GB" && "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        OUTPUT_OPTIONS[MAX_MEMORY_GB]="$value"
     else
         printf "Warning: Ignoring unknown or invalid option %s\n" "$arg" >&2
     fi
@@ -273,32 +272,46 @@ process_results() {
     } > "$reduce_input_file"
 
     python -m A001_functions.Reduce_resultsV5 < "$reduce_input_file" > "$log_folder/SIM_${sim_number}_reduce.log" 2>&1
+    local reduce_status=$?
     rm -f "$reduce_input_file"
 
-    printf "Results processing for simulation %s completed.\n" "$sim"
-
-    if [[ "$MOVE_FOLDER" == "y" ]]; then
-        local realpath_sim;
-        if ! realpath_sim=$(realpath "$sim_path"); then
-            printf "Error: Unable to resolve real path for %s\n" "$sim_path" >&2
-            return 1
-        fi
-
-        local target_dir="/data/Franco/$(basename "$(dirname "$realpath_sim")")_completed"
-        local dest_dir="$target_dir/SIM_${sim_number}"
-
-        mkdir -p "$target_dir"
-
-        if [[ -d "$dest_dir" ]]; then
-            rm -rf "$dest_dir"
-            printf "Warning: Existing directory %s was removed.\n" "$dest_dir" >&2
-        fi
-
-        mv "$sim_path" "$dest_dir"
-        printf "Moved %s to %s\n" "$sim_path" "$dest_dir"
+    if [[ $reduce_status -ne 0 ]]; then
+        printf "Error: Reduce for %s failed. See logs/SIM_%s_reduce.log\n" "$sim" "$sim_number" >&2
+    else
+        printf "Results processing for simulation %s completed.\n" "$sim"
     fi
 
-    if [[ "$CREATE_VIDEO" == "y" ]]; then
+    if [[ "$MOVE_FOLDER" == "y" ]]; then
+        if [[ $reduce_status -ne 0 ]]; then
+            printf "Warning: Skipping move for %s due to processing errors.\n" "$sim" >&2
+        else
+            local realpath_sim
+            if ! realpath_sim=$(realpath "$sim_path"); then
+                printf "Error: Unable to resolve real path for %s\n" "$sim_path" >&2
+                return 1
+            fi
+
+            local target_dir
+            if [[ -n "$MOVE_DEST" ]]; then
+                target_dir="$MOVE_DEST"
+            else
+                target_dir="/data/Franco/$(basename "$(dirname "$realpath_sim")")_completed"
+            fi
+            local dest_dir="$target_dir/SIM_${sim_number}"
+
+            mkdir -p "$target_dir"
+
+            if [[ -d "$dest_dir" ]]; then
+                rm -rf "$dest_dir"
+                printf "Warning: Existing directory %s was removed.\n" "$dest_dir" >&2
+            fi
+
+            mv "$sim_path" "$dest_dir"
+            printf "Moved %s to %s\n" "$sim_path" "$dest_dir"
+        fi
+    fi
+
+    if [[ "$RUN_VIDEO" == "y" ]]; then
         create_video "$sim_number"
     fi
 }

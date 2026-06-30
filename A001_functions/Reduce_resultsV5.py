@@ -2476,8 +2476,32 @@ def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
         for params in _w_param_sets
     }
 
+    _meta = _propagate_source_metadata(DATA_TP1)
+
+    # Light file: system-level (one value per timestep) — no per-element data
+    PKL_TP2_L = {
+        **_meta,
+        't'                   : t,
+        'time_variant'        : {'areas': tv_areas, 'normalized_areas': tv_norm},
+        'general_information' : general_information,
+        'eta'           : eta,
+        'shear_mean'    : shear_mean,
+        'gle_mean'      : gle_mean,
+        'shear_mean_aw' : shear_mean_aw,
+        'gle_mean_aw'   : gle_mean_aw,
+        'edi_mean'      : edi_mean,
+        'edi_mean_aw'   : edi_mean_aw,
+        'eta_shear'     : eta_shear,
+        'w_mean'              : w_mean,
+        'w_std'               : w_std,
+        'w_cv'                : w_cv,
+        'w_std_area_weighted' : w_std_area_weighted,
+        'w_cv_area_weighted'  : w_cv_area_weighted,
+        'W'                   : W,
+    }
+
     PKL_TP2 = {
-        **_propagate_source_metadata(DATA_TP1),
+        **_meta,
         't'                   : t,
         'time_variant'        : {'areas': tv_areas, 'normalized_areas': tv_norm},
         'time_invariant'      : {'areas': ti_areas, 'normalized_areas': ti_norm},
@@ -2519,6 +2543,11 @@ def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
         with open(output_path, 'wb') as fp:
             pickle.dump(PKL_TP2, fp)
         print(f"PKL_TP2 saved to '{output_path}'")
+
+        light_path = output_path.replace('_TP2.pkl', '_TP2_L.pkl')
+        with open(light_path, 'wb') as fp:
+            pickle.dump(PKL_TP2_L, fp)
+        print(f"PKL_TP2_L saved to '{light_path}'")
 
     return PKL_TP2
 
