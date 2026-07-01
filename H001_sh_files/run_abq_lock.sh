@@ -126,6 +126,7 @@ printf "[%s] Lock monitor started: SIM_%03d to SIM_%03d | interval = %s min | lo
 while true; do
 
     running_count=0
+    pending_count=0
 
     for (( i = SIM_INI; i <= SIM_FIN; i++ )); do
 
@@ -138,7 +139,16 @@ while true; do
         [[ ! -d "$sim_path" ]] && continue
 
         # Not running if .simdir is absent
-        [[ ! -d "$simdir" ]] && continue
+        if [[ ! -d "$simdir" ]]; then
+            # If only .inp file(s) are present, job hasn't started yet — keep waiting
+            non_inp_files=$(find "$sim_path" -maxdepth 1 -type f ! -name "*.inp" | wc -l)
+            if [[ "$non_inp_files" -eq 0 ]]; then
+                (( pending_count++ ))
+                printf "[%s] %s not yet started (only .inp present) -- will recheck later.\n" \
+                    "$(date '+%Y-%m-%d %H:%M:%S')" "$sim_name"
+            fi
+            continue
+        fi
 
         (( running_count++ ))
 
@@ -156,15 +166,15 @@ while true; do
 
     done
 
-    # Stop when no simulation in the range is still running
-    if [[ "$running_count" -eq 0 ]]; then
+    # Stop only when nothing is running or pending
+    if [[ "$running_count" -eq 0 && "$pending_count" -eq 0 ]]; then
         printf "[%s] All simulations in range SIM_%03d to SIM_%03d are done. Exiting.\n" \
             "$(date '+%Y-%m-%d %H:%M:%S')" "$SIM_INI" "$SIM_FIN"
         exit 0
     fi
 
-    printf "[%s] %d simulation(s) still running. Next check in %s minute(s)...\n\n" \
-        "$(date '+%Y-%m-%d %H:%M:%S')" "$running_count" "$WAIT_MINUTES"
+    printf "[%s] %d running, %d pending. Next check in %s minute(s)...\n\n" \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$running_count" "$pending_count" "$WAIT_MINUTES"
 
     sleep "$WAIT_SECONDS"
 
