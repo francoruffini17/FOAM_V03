@@ -15,8 +15,7 @@ from abq_scriptV9 import process_simulation
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Extract Abaqus ODB history to CSV (FOAM_V03). Runs under abq python.',
-        allow_abbrev=False)
+        description='Extract Abaqus ODB history to CSV (FOAM_V03). Runs under abq python.')
     parser.add_argument('sim_start', type=int,
                         help='First simulation number.')
     parser.add_argument('sim_end', type=int,
