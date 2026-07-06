@@ -2,7 +2,7 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-sim_nums =  [1003, 1007, 1008, 1013, 1017, 1018, 1019]#6004, 6005, 6006, 6007, 6008]#4000, 4001, 4002]#, 2003, 2004]#, 2005, 2006, 2007, 2008]
+sim_nums =  [1013, 1015, 1018, 1019, 1003, 1005, 1008, 1009] #004, 6005, 6006, 6007, 6008]#4000, 4001, 4002]#, 2003, 2004]#, 2005, 2006, 2007, 2008]
 
 # 1200, 1201, 1202, 1203, 1204, 1205, 1206, 1207, 1208, 1209,
             # 1210, 1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219]
@@ -27,7 +27,7 @@ def run_simulation(sim_num):
     print(f"Running simulation {sim_num}...")
     try:
         process = subprocess.Popen(
-            ["python", "-m", "A001_functions.Video_executor", str(sim_num), "F001_Video_properties_files/Video_properties_1008"],
+            ["python", "-m", "A001_functions.Video_executor", str(sim_num), "F001_Video_properties_files/Video_properties_1009"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True

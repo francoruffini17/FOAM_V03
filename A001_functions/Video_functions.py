@@ -33,10 +33,25 @@ from A001_functions.fem_stress_interpolation import interpolate_stress
 
 ### ----------------------------- plot frame graph parameter -----------------------------##
 
+def _localization_index_from_shear_min(sim_num):
+    """Frame index of the localization point: the minimum of TP2_L's shear_mean.
+
+    All per-frame result pickles (A2, TP2/TP2_L, I3/J3/H3/K3, DEFC2, ...) share
+    the same frame indexing (one row per ODB frame), so this index can be used
+    directly against any of them without interpolation.
+    """
+    path = f'I001_Results/DATA_PICK_{sim_num:03d}_TP2_L.pkl'
+    with open(path, "rb") as f:
+        tp2l = pickle.load(f)
+    return int(np.argmin(np.array(tp2l['shear_mean'])))
+
+
 @dataclass
 class graph_property:
     ppty: str = None  # Property to plot (e.g., 'Density', 'Subgraphs_number', 'Subgraphs_number_no_indiv')
     t_x: int = None  # Index for special marker on plot
+    mark_localization: bool = False  # If True, mark the localization point (frame index of min shear_mean, from TP2_L) on every frame
+    mark_index: int = None  # Frame index of the localization point; computed automatically per-sim when mark_localization is True
     legends: bool = False  # Whether to show legend
     xlabel: str = None  # X-axis label
     ylabel: str = None  # Y-axis label
@@ -105,6 +120,11 @@ def create_graph_property_frame(pkl_G2,T):
             if T.t_x >0:
                 plt.plot(pkl_G2['t'][T.t_x],sg_t[T.t_x],'kx')
 
+        if T.mark_index is not None and T.mark_index > 0:
+            plt.plot(pkl_G2['t'][T.mark_index], sg_t[T.mark_index], marker='D',
+                      color='lime', markeredgecolor='k', markersize=9, zorder=6,
+                      linestyle='None', label='Localization point')
+
         # All-nodes-normalised efficiency overlay (NaN for H2/I2 pickles
         # created before 'n_nodes_total' existed - curve simply not drawn)
         if T.ppty == 'G_eff' and T.include_allnodes and 'global_ef_t_allnodes' in pkl_G2:
@@ -139,6 +159,12 @@ def create_graph_property_frame(pkl_G2,T):
             if T.t_x > 0:
                 plt.plot(pkl_G2['t'][T.t_x],sg_c[T.t_x],'kx')
 
+        if T.mark_index is not None and T.mark_index > 0:
+            label = 'Localization point' if T.tension_compression == 'compression' else None
+            plt.plot(pkl_G2['t'][T.mark_index], sg_c[T.mark_index], marker='D',
+                      color='lime', markeredgecolor='k', markersize=9, zorder=6,
+                      linestyle='None', label=label)
+
         # All-nodes-normalised efficiency overlay (see tension branch note)
         if T.ppty == 'G_eff' and T.include_allnodes and 'global_ef_c_allnodes' in pkl_G2:
             sg_c_all = np.array(pkl_G2['global_ef_c_allnodes'], dtype=float)
@@ -159,6 +185,11 @@ def create_graph_property_frame(pkl_G2,T):
         if T.t_x is not None:
             if T.t_x > 0:
                 plt.plot(pkl_G2['t'][T.t_x],sg_t[T.t_x]/sg_c[T.t_x],'kx')
+
+        if T.mark_index is not None and T.mark_index > 0:
+            plt.plot(pkl_G2['t'][T.mark_index], sg_t[T.mark_index]/sg_c[T.mark_index],
+                      marker='D', color='lime', markeredgecolor='k', markersize=9,
+                      zorder=6, linestyle='None', label='Localization point')
 
 
 
@@ -210,11 +241,14 @@ def create_graph_property_multiple_frames(sim_num, T, save_path=None, frames_for
     else:
         indices = range(total_frames)
 
+    mark_index = _localization_index_from_shear_min(sim_num) if getattr(T, 'mark_localization', False) else None
+
     for i in indices:
         save_path_ = os.path.join(save_path, f'frame_{i:08d}.{frames_format}')
         T_c = copy.deepcopy(T)
         T_c.save_path = save_path_
         T_c.t_x = i
+        T_c.mark_index = mark_index
 
         try:
             create_graph_property_frame(Gs, T_c)
@@ -1435,6 +1469,8 @@ class frame_variable:
     file_key_x: str = 'A2'
     yscale: str = 'linear'
     ratio_key_pairs: list = None
+    mark_localization: bool = False  # If True, mark the localization point (frame index of min shear_mean, from TP2_L) on every frame
+    localization_index: int = None  # Frame index of the localization point; computed automatically per-sim when mark_localization is True
 
 
 
@@ -1537,7 +1573,16 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
                         plt.scatter(D[t_x] - D[0], Y[t_x], color='red')
                 else:
                     plt.axvline(D[t_x], color='red', linestyle=':', linewidth=2)
-                    
+
+            loc_idx = getattr(T, 'localization_index', None)
+            if loc_idx is not None and loc_idx > 0:
+                loc_label = 'Localization point' if i == 0 else None
+                plt.scatter(D[loc_idx], Y[loc_idx], marker='D', color='lime',
+                            edgecolor='k', s=70, zorder=6, label=loc_label)
+                if T.plot_from_0 is True:
+                    plt.scatter(D[loc_idx] - D[0], Y[loc_idx], marker='D', color='lime',
+                                edgecolor='k', s=70, zorder=6)
+
         except:
             print(y_key_path)
             print('Warning variable do not exist')
@@ -1553,6 +1598,12 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
             plt.plot(D, ratio, '-', label=label)
             if t_x is not None:
                 plt.scatter(D[t_x], ratio[t_x], color='red')
+
+            loc_idx = getattr(T, 'localization_index', None)
+            if loc_idx is not None and loc_idx > 0:
+                loc_label = 'Localization point' if (i == 0 and not y_key_paths) else None
+                plt.scatter(D[loc_idx], ratio[loc_idx], marker='D', color='lime',
+                            edgecolor='k', s=70, zorder=6, label=loc_label)
         except Exception:
             print(f"Warning: ratio {num_path}/{den_path} could not be computed")
 
@@ -1606,6 +1657,9 @@ def create_variable_multiple_frames(sim_num, T , save_path = None, frames_format
 
     if T.experiment_plot is not None:
         T.experiment_plot = T.experiment_plot + f'{sim_num:03d}.log'
+
+    if getattr(T, 'mark_localization', False):
+        T.localization_index = _localization_index_from_shear_min(sim_num)
 
     for ti in indices:
         T.save_path = save_path + f'frame_{ti:08d}.{frames_format}'

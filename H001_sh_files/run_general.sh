@@ -3,7 +3,34 @@
 # Identical orchestration to run_all.sh; uses abq_scriptV20/Reduce_resultsV20/Video_executorV20
 # instead of piping stdin to the legacy V5/V9 scripts.
 
-source "/home/franco/miniconda3/etc/profile.d/conda.sh" || {
+CONDA_SH=""
+
+if [[ -n "${CONDA_EXE:-}" ]]; then
+    CONDA_ROOT="$(dirname "$(dirname "$CONDA_EXE")")"
+    if [[ -f "$CONDA_ROOT/etc/profile.d/conda.sh" ]]; then
+        CONDA_SH="$CONDA_ROOT/etc/profile.d/conda.sh"
+    fi
+fi
+
+if [[ -z "$CONDA_SH" ]]; then
+    for candidate in \
+        "$HOME/miniconda3/etc/profile.d/conda.sh" \
+        "$HOME/anaconda3/etc/profile.d/conda.sh" \
+        "/opt/anaconda3/etc/profile.d/conda.sh"
+    do
+        if [[ -f "$candidate" ]]; then
+            CONDA_SH="$candidate"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$CONDA_SH" ]]; then
+    printf "Error: Could not find conda initialization script.\n" >&2
+    exit 1
+fi
+
+source "$CONDA_SH" || {
     printf "Error: Failed to source conda initialization script.\n" >&2
     exit 1
 }
