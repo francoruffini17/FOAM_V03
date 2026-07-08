@@ -90,7 +90,10 @@ for P in Ps:
         time_interval_out=0.005,
         frequ_out=100,
         out_frames=100,
-        restart_line='',
+        # Restart state at every output frame so the stiffness matrix can be
+        # regenerated (via a *Matrix Generate restart step) at each frame to
+        # extract the lowest eigenvalue - see A001_functions/stiffness_eigen.py
+        restart_line='*Restart, write, number interval=100\n',
         ELE_OUTPUT="S11, S12, S22",
         NODES_OUTPUT="COOR1, COOR2",
         additional_outputs=[f"""** HISTORY OUTPUT: H-Set-y-negative

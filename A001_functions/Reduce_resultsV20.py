@@ -72,6 +72,7 @@ def main():
     yn('TP2',   'n', 'PKL TP2')
     yn('DEFC1', 'n', 'PKL DEFC1')
     yn('DEFC2', 'n', 'PKL DEFC2')
+    yn('E',     'n', 'PKL E - lowest stiffness-matrix eigenvalue per frame')
 
     p.add_argument('--delete-csv', default='n', type=_yn, metavar='y|n',
                    help='Delete CSV after reduction (default: n)')
@@ -98,7 +99,7 @@ def main():
             args.K1, args.K2, args.K3, args.K_ini, args.K_fin, K_alg,
             args.Q1, args.Q2, args.Q_ini, args.Q_fin,
             args.TP1, args.TP2,
-            args.DEFC1, args.DEFC2,
+            args.DEFC1, args.DEFC2, args.E,
             args.delete_csv,
             args.n_workers or None,      # 0 → None (auto)
             args.max_memory_gb or None,  # 0.0 → None (auto)

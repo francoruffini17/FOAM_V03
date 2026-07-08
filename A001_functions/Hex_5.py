@@ -4260,6 +4260,587 @@ def create_hexagonal_mesh_2(
 
     return generator, mesh
 
+
+# ---------------------------------------------------------------------------
+# Square packing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SquarePackingGeometry:
+    """
+    Geometry parameters for square packing of circular holes.
+
+    The unit cell is a square of side ``a`` containing one hole, i.e. holes
+    sit on a plain Cartesian grid (no row offset).
+
+    Unit cell area = a^2
+    Hole area = pi * r^2
+    Porosity = pi * r^2 / a^2
+    """
+    horizontal_spacing: float  # a: distance between hole centers in a row
+    vertical_spacing: float    # b: distance between rows (== a)
+    hole_radius: float         # r: radius of circular holes
+    porosity: float            # phi: area fraction of holes
+
+    @classmethod
+    def from_porosity_and_spacing(cls, porosity: float, horizontal_spacing: float) -> 'SquarePackingGeometry':
+        """
+        Create geometry from target porosity and horizontal spacing.
+
+        Args:
+            porosity: Target area fraction (0 < porosity < pi/4 ≈ 0.7854)
+            horizontal_spacing: Distance between hole centers, both axes
+        """
+        max_porosity = np.pi / 4  # ~0.7854, when holes touch their row/column neighbours
+        if porosity <= 0 or porosity >= max_porosity:
+            raise ValueError(f"Porosity must be between 0 and {max_porosity:.4f} (got {porosity})")
+
+        a = horizontal_spacing
+        r = a * np.sqrt(porosity / np.pi)
+
+        return cls(horizontal_spacing=a, vertical_spacing=a, hole_radius=r, porosity=porosity)
+
+    @classmethod
+    def from_radius_and_spacing(cls, hole_radius: float, horizontal_spacing: float) -> 'SquarePackingGeometry':
+        """Create geometry from hole radius and horizontal spacing."""
+        a = horizontal_spacing
+        r = hole_radius
+        porosity = np.pi * r**2 / a**2
+
+        max_porosity = np.pi / 4
+        if porosity >= max_porosity:
+            raise ValueError(f"Hole radius too large: porosity {porosity:.4f} >= max {max_porosity:.4f}")
+
+        return cls(horizontal_spacing=a, vertical_spacing=a, hole_radius=r, porosity=porosity)
+
+    def get_minimum_ligament(self) -> float:
+        """Return the minimum distance between hole edges."""
+        return self.horizontal_spacing - 2 * self.hole_radius
+
+
+class SquareMeshGenerator2(HexagonalMeshGenerator2):
+    """
+    Like :class:`HexagonalMeshGenerator2` but holes are placed on a plain
+    square (Cartesian) grid instead of a hexagonal/triangular lattice.
+
+    All meshing, edge-padding, and periodic-boundary machinery is inherited
+    unchanged from :class:`HexagonalMeshGenerator2`; only the lattice used
+    to place hole centers differs (no row-to-row offset).
+    """
+
+    def __init__(
+        self,
+        domain_size: float,
+        n_holes_width: int,
+        porosity: float,
+        center_domain: bool = True,
+        allow_cut_left: bool = True,
+        allow_cut_right: bool = True,
+        allow_cut_bottom: bool = True,
+        allow_cut_top: bool = True,
+    ):
+        self.allow_cut_left = allow_cut_left
+        self.allow_cut_right = allow_cut_right
+        self.allow_cut_bottom = allow_cut_bottom
+        self.allow_cut_top = allow_cut_top
+
+        # Bypass HexagonalMeshGenerator2.__init__ / HexagonalMeshGenerator.__init__
+        # so we can build a SquarePackingGeometry instead of a hexagonal one.
+        self.domain_size = domain_size
+        self.n_holes_width = n_holes_width
+        self.porosity = porosity
+        self.center_domain = center_domain
+        self.horizontal_spacing = domain_size / n_holes_width
+        self.geometry = SquarePackingGeometry.from_porosity_and_spacing(
+            porosity, self.horizontal_spacing
+        )
+        self.hole_centers = self._compute_hole_centers()
+
+    def _compute_hole_centers(self) -> np.ndarray:
+        """Compute hole centers on a square grid, including partial (cut) holes."""
+        a = self.geometry.horizontal_spacing
+        b = self.geometry.vertical_spacing
+        r = self.geometry.hole_radius
+        L = self.domain_size
+
+        row_start = int(np.floor(-r / b)) - 1
+        row_end = int(np.ceil((L + r) / b)) + 1
+
+        centers = []
+        for row in range(row_start, row_end + 1):
+            y = row * b
+            if self.center_domain:
+                x_base = (L % a) / 2
+            else:
+                x_base = a / 2
+
+            x = x_base
+            while x > -r:
+                x -= a
+
+            while x < L + r:
+                if (x + r > 0 and x - r < L and y + r > 0 and y - r < L):
+                    centers.append([x, y])
+                x += a
+
+        if len(centers) == 0:
+            warnings.warn("No holes overlap the domain with current parameters")
+            return np.array([]).reshape(0, 2)
+
+        centers = np.array(centers)
+
+        tol_edge = L * 1e-8
+        keep = np.ones(len(centers), dtype=bool)
+        for i, (cx, cy) in enumerate(centers):
+            cuts_left   = (cx - r) < -tol_edge
+            cuts_right  = (cx + r) > L + tol_edge
+            cuts_bottom = (cy - r) < -tol_edge
+            cuts_top    = (cy + r) > L + tol_edge
+
+            if cuts_left and not self.allow_cut_left:
+                keep[i] = False
+            if cuts_right and not self.allow_cut_right:
+                keep[i] = False
+            if cuts_bottom and not self.allow_cut_bottom:
+                keep[i] = False
+            if cuts_top and not self.allow_cut_top:
+                keep[i] = False
+        centers = centers[keep]
+
+        if len(centers) == 0:
+            warnings.warn("All holes were removed by edge-cut filters")
+            return np.array([]).reshape(0, 2)
+
+        if self.center_domain and len(centers) > 0:
+            y_min = centers[:, 1].min()
+            y_max = centers[:, 1].max()
+            y_shift = L / 2 - (y_max + y_min) / 2
+            centers[:, 1] += y_shift
+
+            mask = (
+                (centers[:, 0] + r > 0) & (centers[:, 0] - r < L) &
+                (centers[:, 1] + r > 0) & (centers[:, 1] - r < L)
+            )
+            centers = centers[mask]
+
+        return centers
+
+
+# ---------------------------------------------------------------------------
+# Rhombic (general oblique-lattice) packing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RhombicPackingGeometry:
+    """
+    Geometry parameters for a general oblique (rhombic) packing of circular
+    holes.
+
+    The lattice is built from two primitive vectors of equal length ``a``
+    separated by ``lattice_angle_deg``:
+
+        a1 = (a, 0)
+        a2 = (a * cos(theta), a * sin(theta))
+
+    Hexagonal packing is the theta = 60 (or 120) special case; square
+    packing is the theta = 90 special case. Any other angle gives a
+    genuinely rhombic (diamond-shaped unit cell) arrangement.
+
+    Unit cell area = |a1 x a2| = a^2 * sin(theta)
+    Nearest-neighbour distance (for 60 <= theta <= 120) is ``a`` in every
+    direction, so porosity is maximised when 2r = a, same as hex packing.
+    """
+    horizontal_spacing: float  # a: lattice vector length
+    vertical_spacing: float    # b = a * sin(theta): row-to-row distance
+    hole_radius: float         # r: radius of circular holes
+    porosity: float            # phi: area fraction of holes
+    lattice_angle_deg: float   # theta: angle between the two primitive vectors
+
+    @classmethod
+    def from_porosity_and_spacing(
+        cls,
+        porosity: float,
+        horizontal_spacing: float,
+        lattice_angle_deg: float = 75.0,
+    ) -> 'RhombicPackingGeometry':
+        """
+        Create geometry from target porosity, lattice-vector length, and
+        the oblique angle between the two lattice vectors.
+
+        Args:
+            porosity: Target area fraction. Must stay below the
+                touching-circle limit ``pi / (4 * sin(theta))``.
+            horizontal_spacing: Length ``a`` of both primitive lattice vectors.
+            lattice_angle_deg: Angle theta (degrees) between the two lattice
+                vectors. 60/120 reproduces hexagonal packing, 90 reproduces
+                square packing. Must lie strictly between 0 and 180.
+        """
+        if not (0 < lattice_angle_deg < 180):
+            raise ValueError(f"lattice_angle_deg must be in (0, 180) (got {lattice_angle_deg})")
+
+        theta = np.radians(lattice_angle_deg)
+        a = horizontal_spacing
+
+        max_porosity = np.pi / (4 * np.sin(theta))
+        if porosity <= 0 or porosity >= max_porosity:
+            raise ValueError(f"Porosity must be between 0 and {max_porosity:.4f} (got {porosity})")
+
+        r = a * np.sqrt(porosity * np.sin(theta) / np.pi)
+        b = a * np.sin(theta)
+
+        return cls(
+            horizontal_spacing=a,
+            vertical_spacing=b,
+            hole_radius=r,
+            porosity=porosity,
+            lattice_angle_deg=lattice_angle_deg,
+        )
+
+    def get_minimum_ligament(self) -> float:
+        """Return the minimum distance between hole edges."""
+        return self.horizontal_spacing - 2 * self.hole_radius
+
+
+class RhombicMeshGenerator2(HexagonalMeshGenerator2):
+    """
+    Like :class:`HexagonalMeshGenerator2` but holes are placed on a general
+    oblique (rhombic) lattice with a configurable angle between the two
+    lattice vectors, instead of the fixed 60-degree hexagonal lattice.
+
+    All meshing, edge-padding, and periodic-boundary machinery is inherited
+    unchanged from :class:`HexagonalMeshGenerator2`; only the lattice used
+    to place hole centers differs.
+    """
+
+    def __init__(
+        self,
+        domain_size: float,
+        n_holes_width: int,
+        porosity: float,
+        lattice_angle_deg: float = 75.0,
+        center_domain: bool = True,
+        allow_cut_left: bool = True,
+        allow_cut_right: bool = True,
+        allow_cut_bottom: bool = True,
+        allow_cut_top: bool = True,
+    ):
+        self.allow_cut_left = allow_cut_left
+        self.allow_cut_right = allow_cut_right
+        self.allow_cut_bottom = allow_cut_bottom
+        self.allow_cut_top = allow_cut_top
+        self.lattice_angle_deg = lattice_angle_deg
+
+        self.domain_size = domain_size
+        self.n_holes_width = n_holes_width
+        self.porosity = porosity
+        self.center_domain = center_domain
+        self.horizontal_spacing = domain_size / n_holes_width
+        self.geometry = RhombicPackingGeometry.from_porosity_and_spacing(
+            porosity, self.horizontal_spacing, lattice_angle_deg=lattice_angle_deg
+        )
+        self.hole_centers = self._compute_hole_centers()
+
+    def _compute_hole_centers(self) -> np.ndarray:
+        """Compute hole centers on the oblique lattice, including partial (cut) holes."""
+        a = self.geometry.horizontal_spacing
+        b = self.geometry.vertical_spacing
+        r = self.geometry.hole_radius
+        L = self.domain_size
+        theta = np.radians(self.geometry.lattice_angle_deg)
+        dx_per_row = a * np.cos(theta)
+
+        row_start = int(np.floor(-r / b)) - 1
+        row_end = int(np.ceil((L + r) / b)) + 1
+
+        centers = []
+        for row in range(row_start, row_end + 1):
+            y = row * b
+            # Row-to-row shift, wrapped into [0, a) so the lattice stays
+            # periodic in x with period a (exact for hex/square angles;
+            # a good approximation for arbitrary angles otherwise).
+            x_offset = (row * dx_per_row) % a
+
+            if self.center_domain:
+                x_base = (L % a) / 2 + x_offset
+            else:
+                x_base = a / 2 + x_offset
+
+            x = x_base
+            while x > -r:
+                x -= a
+
+            while x < L + r:
+                if (x + r > 0 and x - r < L and y + r > 0 and y - r < L):
+                    centers.append([x, y])
+                x += a
+
+        if len(centers) == 0:
+            warnings.warn("No holes overlap the domain with current parameters")
+            return np.array([]).reshape(0, 2)
+
+        centers = np.array(centers)
+
+        tol_edge = L * 1e-8
+        keep = np.ones(len(centers), dtype=bool)
+        for i, (cx, cy) in enumerate(centers):
+            cuts_left   = (cx - r) < -tol_edge
+            cuts_right  = (cx + r) > L + tol_edge
+            cuts_bottom = (cy - r) < -tol_edge
+            cuts_top    = (cy + r) > L + tol_edge
+
+            if cuts_left and not self.allow_cut_left:
+                keep[i] = False
+            if cuts_right and not self.allow_cut_right:
+                keep[i] = False
+            if cuts_bottom and not self.allow_cut_bottom:
+                keep[i] = False
+            if cuts_top and not self.allow_cut_top:
+                keep[i] = False
+        centers = centers[keep]
+
+        if len(centers) == 0:
+            warnings.warn("All holes were removed by edge-cut filters")
+            return np.array([]).reshape(0, 2)
+
+        if self.center_domain and len(centers) > 0:
+            y_min = centers[:, 1].min()
+            y_max = centers[:, 1].max()
+            y_shift = L / 2 - (y_max + y_min) / 2
+            centers[:, 1] += y_shift
+
+            mask = (
+                (centers[:, 0] + r > 0) & (centers[:, 0] - r < L) &
+                (centers[:, 1] + r > 0) & (centers[:, 1] - r < L)
+            )
+            centers = centers[mask]
+
+        return centers
+
+
+# ---------------------------------------------------------------------------
+# Config objects + entry points for the square and rhombic mesh generators
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MeshConfigSquare:
+    """Configuration object for square-packing mesh generation. See MeshConfig."""
+    domain_size: float
+    n_holes_width: int
+    porosity: float
+    edge_left: float = 0.0
+    edge_right: float = 0.0
+    edge_bottom: float = 0.0
+    edge_top: float = 0.0
+
+
+@dataclass
+class MeshConfigRhombic:
+    """Configuration object for rhombic-packing mesh generation. See MeshConfig."""
+    domain_size: float
+    n_holes_width: int
+    porosity: float
+    lattice_angle_deg: float = 75.0
+    edge_left: float = 0.0
+    edge_right: float = 0.0
+    edge_bottom: float = 0.0
+    edge_top: float = 0.0
+
+
+def _create_lattice_mesh_2(
+    generator_cls,
+    mesh_kind: str,
+    created_by: str,
+    config,
+    filepath: str,
+    export_mesh: bool = True,
+    export_vtk: bool = True,
+    show_plot: bool = False,
+    show_periodic_matching: bool = False,
+    elements_around_hole: int = 24,
+    mesh_size_factor: float = 1.0,
+    mesh_size: float = None,
+    allow_cut_left: bool = True,
+    allow_cut_right: bool = True,
+    allow_cut_bottom: bool = True,
+    allow_cut_top: bool = True,
+    element_type: str = "QUAD",
+    edge_left: float = None,
+    edge_right: float = None,
+    edge_bottom: float = None,
+    edge_top: float = None,
+    periodic: str = "none",
+    extra_generator_kwargs: dict = None,
+):
+    """
+    Shared implementation behind :func:`create_square_mesh` and
+    :func:`create_rhombic_mesh` — identical to :func:`create_hexagonal_mesh_2`
+    except that the lattice generator class and JSON ``mesh_kind`` tag are
+    parameterized.
+    """
+    generator = generator_cls(
+        domain_size=config.domain_size,
+        n_holes_width=config.n_holes_width,
+        porosity=config.porosity,
+        allow_cut_left=allow_cut_left,
+        allow_cut_right=allow_cut_right,
+        allow_cut_bottom=allow_cut_bottom,
+        allow_cut_top=allow_cut_top,
+        **(extra_generator_kwargs or {}),
+    )
+
+    w_l = float(edge_left   if edge_left   is not None else getattr(config, 'edge_left',   0.0))
+    w_r = float(edge_right  if edge_right  is not None else getattr(config, 'edge_right',  0.0))
+    w_b = float(edge_bottom if edge_bottom is not None else getattr(config, 'edge_bottom', 0.0))
+    w_t = float(edge_top    if edge_top    is not None else getattr(config, 'edge_top',    0.0))
+    has_strips = bool(w_l or w_r or w_b or w_t)
+
+    padding = ({"left": w_l, "right": w_r, "bottom": w_b, "top": w_t}
+               if has_strips else None)
+
+    _periodic  = periodic.strip().lower()
+    periodic_lr = _periodic in ("lr", "both")
+    periodic_tb = _periodic in ("tb", "both")
+
+    mesh = generator.generate_mesh(
+        elements_around_hole=elements_around_hole,
+        mesh_size_factor=mesh_size_factor,
+        mesh_size=mesh_size,
+        element_type=element_type,
+        edge_padding=padding,
+        periodic_lr=periodic_lr,
+        periodic_tb=periodic_tb,
+    )
+
+    if has_strips:
+        L  = config.domain_size
+        sx = L / (L + w_l + w_r)
+        sy = L / (L + w_b + w_t)
+
+        mesh.nodes[:, 0] = (mesh.nodes[:, 0] + w_l) * sx
+        mesh.nodes[:, 1] = (mesh.nodes[:, 1] + w_b) * sy
+
+        centres           = generator.hole_centers.copy()
+        centres[:, 0]     = (centres[:, 0] + w_l) * sx
+        centres[:, 1]     = (centres[:, 1] + w_b) * sy
+        generator.hole_centers = centres
+
+        generator.geometry.horizontal_spacing *= sx
+        generator.geometry.vertical_spacing *= sy
+        generator.geometry.hole_radius *= np.sqrt(sx * sy)
+
+        print(f"  Edge strips added (L={edge_left}, R={edge_right}, "
+              f"B={edge_bottom}, T={edge_top}), mesh rescaled to "
+              f"[0, {config.domain_size}]")
+
+    mesh.compute_node_labels()
+
+    out_dir = os.path.dirname(filepath)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    mesh_json = _ensure_json_suffix(filepath, "mesh")
+    if export_mesh:
+        parameters = {
+            "config": {
+                "domain_size": config.domain_size,
+                "n_holes_width": config.n_holes_width,
+                "porosity": config.porosity,
+            },
+            "elements_around_hole": elements_around_hole,
+            "mesh_size_factor": mesh_size_factor,
+            "allow_cut_left": allow_cut_left,
+            "allow_cut_right": allow_cut_right,
+            "allow_cut_bottom": allow_cut_bottom,
+            "allow_cut_top": allow_cut_top,
+            "element_type": element_type,
+            "edge_left": edge_left,
+            "edge_right": edge_right,
+            "edge_bottom": edge_bottom,
+            "edge_top": edge_top,
+            "periodic": periodic,
+        }
+        if extra_generator_kwargs:
+            parameters["config"].update(extra_generator_kwargs)
+        write_mesh_json(
+            mesh,
+            mesh_json,
+            mesh_kind=mesh_kind,
+            created_by=created_by,
+            generator=generator,
+            parameters=parameters,
+        )
+        if export_vtk:
+            export_mesh_vtk_from_json(mesh_json)
+
+    show_any_plot = False
+    if show_plot:
+        generator.plot_mesh(mesh, show_nodes=True, show_elements=True,
+                            show_holes=True, highlight_hole_boundary=True)
+        generator.plot_node_labels(mesh, show_label=True)
+        show_any_plot = True
+
+    if show_periodic_matching:
+        if export_mesh:
+            from A001_functions.plot_mesh_functions import plot_mesh_json_periodic
+
+            plot_mesh_json_periodic(mesh_json, show=False)
+            show_any_plot = True
+        else:
+            warnings.warn("show_periodic_matching requires export_mesh=True")
+
+    if show_any_plot:
+        plt.show()
+
+    print(
+        f"Mesh created: {mesh.n_nodes} nodes, {mesh.n_elements} elements, "
+        f"{len(generator.hole_centers)} holes (incl. partial)"
+    )
+
+    return generator, mesh
+
+
+def create_square_mesh(
+    config: MeshConfigSquare,
+    filepath: str,
+    **kwargs,
+):
+    """
+    Create a finite-element mesh for a square (Cartesian) hole packing and
+    write it as ``*.mesh.json``. Same signature/behaviour as
+    :func:`create_hexagonal_mesh_2`, aside from the lattice.
+    """
+    return _create_lattice_mesh_2(
+        SquareMeshGenerator2,
+        mesh_kind="square_packing",
+        created_by="create_square_mesh",
+        config=config,
+        filepath=filepath,
+        **kwargs,
+    )
+
+
+def create_rhombic_mesh(
+    config: MeshConfigRhombic,
+    filepath: str,
+    **kwargs,
+):
+    """
+    Create a finite-element mesh for a rhombic (oblique-lattice) hole
+    packing and write it as ``*.mesh.json``. Same signature/behaviour as
+    :func:`create_hexagonal_mesh_2`, aside from the lattice and the extra
+    ``lattice_angle_deg`` config field.
+    """
+    return _create_lattice_mesh_2(
+        RhombicMeshGenerator2,
+        mesh_kind="rhombic_packing",
+        created_by="create_rhombic_mesh",
+        config=config,
+        filepath=filepath,
+        extra_generator_kwargs={"lattice_angle_deg": config.lattice_angle_deg},
+        **kwargs,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Undeformed → Deformed mapping
 # ---------------------------------------------------------------------------

@@ -81,12 +81,23 @@ Usage: $0 sim_num_ini sim_num_fin [OPTION=VALUE ...]
 Step flags (default: n):
   RUN_SIMULATIONS=y|n   Run Abaqus FEM solver
   RUN_ABQ=y|n           Run ODB extraction  (abq python abq_scriptV20.py)
+  RUN_EIGEN=y|n         Run stiffness-matrix min-eigenvalue extraction
+                        (needed to produce DATA_PICK_*_EIG.json for PKL E;
+                        only useful if the .inp has *Restart, write)
   RUN_REDUCE=y|n        Run Reduce_resultsV20
   RUN_VIDEO=y|n         Run Video_executorV20
+
+  CONTINUE_ON_SOLVER_ERROR=y|n
+                        If a solver/ABQ-extraction step fails (e.g. the
+                        Abaqus solve did not fully converge but wrote output
+                        for the last converged increment), keep running the
+                        downstream steps for that simulation instead of
+                        skipping them (default: n)
 
 Parallelism (default: 1):
   -par_simulations=N    Max parallel solver jobs
   -par_abq=N            Max parallel ABQ extraction jobs
+  -par_eigen=N          Max parallel eigenvalue-extraction jobs
   -par_red=N            Max parallel Reduce jobs
   -par_vid=N            Max parallel Video jobs
 
@@ -106,6 +117,7 @@ Reduce output options (defaults shown):
   K1=y  K2=y  K3=y  K_ini=0  K_fin=0  K_alg=1
   Q1=n  Q2=n  Q_ini=0  Q_fin=0
   TP1=n  TP2=n  DEFC1=n  DEFC2=n
+  E=n
   DELETE_CSV=n  N_WORKERS=0  MAX_MEMORY_GB=0
   (N_WORKERS=0 and MAX_MEMORY_GB=0 mean auto)
 
@@ -135,8 +147,9 @@ else
     LIST_FILE="$1"; shift
 fi
 
-RUN_SIMULATIONS="n"; RUN_ABQ="n"; RUN_REDUCE="n"; RUN_VIDEO="n"
-PAR_SIMULATIONS=1; PAR_ABQ=1; PAR_RED=1; PAR_VID=1
+RUN_SIMULATIONS="n"; RUN_ABQ="n"; RUN_EIGEN="n"; RUN_REDUCE="n"; RUN_VIDEO="n"
+CONTINUE_ON_SOLVER_ERROR="n"
+PAR_SIMULATIONS=1; PAR_ABQ=1; PAR_EIGEN=1; PAR_RED=1; PAR_VID=1
 START_DELAY=120
 CPUS=1; DELETE_ODB="n"; MOVE_FOLDER="n"; MOVE_DEST=""
 VIDEOS_PROPERTIES_FILES="Video_properties0001"
@@ -150,12 +163,14 @@ declare -A OUTPUT_OPTIONS=(
     [K1]="y"   [K2]="y"   [K3]="y"   [K_ini]="0" [K_fin]="0" [K_alg]="1"
     [Q1]="n"   [Q2]="n"   [Q_ini]="0" [Q_fin]="0"
     [TP1]="n"  [TP2]="n"  [DEFC1]="n" [DEFC2]="n"
+    [E]="n"
     [DELETE_CSV]="n" [N_WORKERS]="0" [MAX_MEMORY_GB]="0"
 )
 
 for arg in "$@"; do
     if   [[ "$arg" =~ ^-par_simulations=([0-9]+)$ ]]; then PAR_SIMULATIONS="${BASH_REMATCH[1]}"
     elif [[ "$arg" =~ ^-par_abq=([0-9]+)$ ]];         then PAR_ABQ="${BASH_REMATCH[1]}"
+    elif [[ "$arg" =~ ^-par_eigen=([0-9]+)$ ]];       then PAR_EIGEN="${BASH_REMATCH[1]}"
     elif [[ "$arg" =~ ^-par_red=([0-9]+)$ ]];         then PAR_RED="${BASH_REMATCH[1]}"
     elif [[ "$arg" =~ ^-par_vid=([0-9]+)$ ]];         then PAR_VID="${BASH_REMATCH[1]}"
     elif [[ "$arg" =~ ^-delay=([0-9]+)$ ]];           then START_DELAY="${BASH_REMATCH[1]}"
@@ -164,6 +179,8 @@ for arg in "$@"; do
         case "$key" in
             RUN_SIMULATIONS) [[ "$value" == y || "$value" == n ]] && RUN_SIMULATIONS="$value" ;;
             RUN_ABQ)         [[ "$value" == y || "$value" == n ]] && RUN_ABQ="$value" ;;
+            RUN_EIGEN)       [[ "$value" == y || "$value" == n ]] && RUN_EIGEN="$value" ;;
+            CONTINUE_ON_SOLVER_ERROR) [[ "$value" == y || "$value" == n ]] && CONTINUE_ON_SOLVER_ERROR="$value" ;;
             RUN_REDUCE)      [[ "$value" == y || "$value" == n ]] && RUN_REDUCE="$value" ;;
             RUN_VIDEO)       [[ "$value" == y || "$value" == n ]] && RUN_VIDEO="$value" ;;
             cpus)            [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] && CPUS="$value" ;;
@@ -178,15 +195,16 @@ for arg in "$@"; do
     fi
 done
 
-if [[ "$RUN_SIMULATIONS" == n && "$RUN_ABQ" == n && "$RUN_REDUCE" == n && "$RUN_VIDEO" == n ]]; then
-    printf "Error: No steps enabled. Set at least one of RUN_SIMULATIONS/RUN_ABQ/RUN_REDUCE/RUN_VIDEO=y.\n" >&2
+if [[ "$RUN_SIMULATIONS" == n && "$RUN_ABQ" == n && "$RUN_EIGEN" == n && "$RUN_REDUCE" == n && "$RUN_VIDEO" == n ]]; then
+    printf "Error: No steps enabled. Set at least one of RUN_SIMULATIONS/RUN_ABQ/RUN_EIGEN/RUN_REDUCE/RUN_VIDEO=y.\n" >&2
     exit 1
 fi
 
-if [[ "$RUN_SIMULATIONS" == y || "$RUN_ABQ" == y ]]; then
+if [[ "$RUN_SIMULATIONS" == y || "$RUN_ABQ" == y || "$RUN_EIGEN" == y ]]; then
     resolve_abq_cmd || exit 1
     printf "Using Abaqus command: %s\n" "$ABQ_CMD"
 fi
+export ABQ_CMD
 
 # ---------------------------------------------------------------------------
 create_semaphore() {
@@ -241,6 +259,25 @@ run_abq_extraction() {
     return "$status"
 }
 
+run_eigen() {
+    local sim="$1"
+    local sim_number; sim_number=$(printf "%s" "$sim" | grep -oE '[0-9]+$')
+    local sim_path="$SIMS_DIR/$sim"
+    [[ -d "$sim_path" ]] || { printf "Warning: %s not found. Skipping eigenvalue extraction.\n" "$sim_path" >&2; return 1; }
+    printf "Eigen: Starting stiffness-matrix eigenvalue extraction for %s ...\n" "$sim"
+
+    python -m A001_functions.stiffness_eigen "$sim_number" \
+        > "logs/SIM_${sim_number}_eigen.log" 2>&1
+    local status=$?
+
+    if [[ $status -ne 0 ]]; then
+        printf "Error: Eigenvalue extraction for %s failed. See logs/SIM_%s_eigen.log\n" "$sim" "$sim_number" >&2
+    else
+        printf "Eigen: %s completed.\n" "$sim"
+    fi
+    return "$status"
+}
+
 run_reduce() {
     local sim="$1"
     local sim_number; sim_number=$(printf "%s" "$sim" | grep -oE '[0-9]+$')
@@ -268,6 +305,7 @@ run_reduce() {
         --Q-ini "${OUTPUT_OPTIONS[Q_ini]}"    --Q-fin "${OUTPUT_OPTIONS[Q_fin]}" \
         --TP1 "${OUTPUT_OPTIONS[TP1]}"  --TP2 "${OUTPUT_OPTIONS[TP2]}" \
         --DEFC1 "${OUTPUT_OPTIONS[DEFC1]}"  --DEFC2 "${OUTPUT_OPTIONS[DEFC2]}" \
+        --E "${OUTPUT_OPTIONS[E]}" \
         --delete-csv "${OUTPUT_OPTIONS[DELETE_CSV]}" \
         --n-workers "${OUTPUT_OPTIONS[N_WORKERS]}" \
         --max-memory-gb "${OUTPUT_OPTIONS[MAX_MEMORY_GB]}" \
@@ -319,15 +357,34 @@ process_simulation() {
 
     if [[ "$RUN_SIMULATIONS" == y ]]; then
         acquire_semaphore sem_sim; run_simulation "$sim"; local s=$?; release_semaphore sem_sim
-        [[ $s -ne 0 ]] && { printf "Skipping remaining steps for %s.\n" "$sim" >&2; return $s; }
+        if [[ $s -ne 0 ]]; then
+            if [[ "$CONTINUE_ON_SOLVER_ERROR" == y ]]; then
+                printf "Warning: %s solver failed but CONTINUE_ON_SOLVER_ERROR=y - proceeding with partial results.\n" "$sim" >&2
+            else
+                printf "Skipping remaining steps for %s.\n" "$sim" >&2
+                return $s
+            fi
+        fi
     fi
 
     if [[ "$RUN_ABQ" == y ]]; then
         acquire_semaphore sem_abq; run_abq_extraction "$sim"; local s=$?; release_semaphore sem_abq
-        [[ $s -ne 0 ]] && { printf "Skipping reduce/video for %s.\n" "$sim" >&2; return $s; }
+        if [[ $s -ne 0 ]]; then
+            if [[ "$CONTINUE_ON_SOLVER_ERROR" == y ]]; then
+                printf "Warning: %s ABQ extraction failed but CONTINUE_ON_SOLVER_ERROR=y - proceeding.\n" "$sim" >&2
+            else
+                printf "Skipping reduce/video for %s.\n" "$sim" >&2
+                return $s
+            fi
+        fi
     fi
 
     local all_ok=0
+
+    if [[ "$RUN_EIGEN" == y ]]; then
+        acquire_semaphore sem_eigen; run_eigen "$sim"; local s=$?; release_semaphore sem_eigen
+        [[ $s -ne 0 ]] && all_ok=1
+    fi
 
     if [[ "$RUN_REDUCE" == y ]]; then
         acquire_semaphore sem_red; run_reduce "$sim"; local s=$?; release_semaphore sem_red
@@ -350,11 +407,13 @@ main() {
 
     create_semaphore sem_sim "$PAR_SIMULATIONS"
     create_semaphore sem_abq "$PAR_ABQ"
+    create_semaphore sem_eigen "$PAR_EIGEN"
     create_semaphore sem_red "$PAR_RED"
     create_semaphore sem_vid "$PAR_VID"
 
     local MAX_CONCURRENT
     MAX_CONCURRENT=$(( PAR_SIMULATIONS > PAR_ABQ   ? PAR_SIMULATIONS : PAR_ABQ ))
+    MAX_CONCURRENT=$(( MAX_CONCURRENT  > PAR_EIGEN ? MAX_CONCURRENT  : PAR_EIGEN ))
     MAX_CONCURRENT=$(( MAX_CONCURRENT  > PAR_RED   ? MAX_CONCURRENT  : PAR_RED ))
     MAX_CONCURRENT=$(( MAX_CONCURRENT  > PAR_VID   ? MAX_CONCURRENT  : PAR_VID ))
 
