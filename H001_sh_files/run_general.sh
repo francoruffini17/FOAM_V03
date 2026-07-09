@@ -82,8 +82,9 @@ Step flags (default: n):
   RUN_SIMULATIONS=y|n   Run Abaqus FEM solver
   RUN_ABQ=y|n           Run ODB extraction  (abq python abq_scriptV20.py)
   RUN_EIGEN=y|n         Run stiffness-matrix min-eigenvalue extraction
-                        (needed to produce DATA_PICK_*_EIG.json for PKL E;
-                        only useful if the .inp has *Restart, write)
+                        (produces DATA_PICK_*_EIG.json for PKL E via a
+                        standalone replay job - needs only the sim's .inp,
+                        not the odb/csv; re-solves the statics with cpus=N)
   RUN_REDUCE=y|n        Run Reduce_resultsV20
   RUN_VIDEO=y|n         Run Video_executorV20
 
@@ -266,7 +267,7 @@ run_eigen() {
     [[ -d "$sim_path" ]] || { printf "Warning: %s not found. Skipping eigenvalue extraction.\n" "$sim_path" >&2; return 1; }
     printf "Eigen: Starting stiffness-matrix eigenvalue extraction for %s ...\n" "$sim"
 
-    python -m A001_functions.stiffness_eigen "$sim_number" \
+    python -m A001_functions.stiffness_eigen "$sim_number" 100 1.0 "$CPUS" \
         > "logs/SIM_${sim_number}_eigen.log" 2>&1
     local status=$?
 

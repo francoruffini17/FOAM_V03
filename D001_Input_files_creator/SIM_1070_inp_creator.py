@@ -8,8 +8,8 @@ from dataclasses import asdict
 
 E         = 20
 factor    = 2e-5
-sim_num   = 1000
-mesh_file = 'A1000.mesh.json'
+sim_num   = 1070
+mesh_file = 'S1000.mesh.json'
 
 Ps = [0.0] + [0.04 * (np.sqrt(2) ** i) for i in range(9)]
 
@@ -90,11 +90,7 @@ for P in Ps:
         time_interval_out=0.005,
         frequ_out=100,
         out_frames=100,
-        # NOTE: restart data is no longer needed for the stiffness-eigenvalue
-        # extraction - *Matrix Generate on restart crashes ABAQUS/pre on this
-        # model, so A001_functions/stiffness_eigen.py now runs a standalone
-        # replay job instead. Kept only as a general safety net.
-        restart_line='*Restart, write, number interval=100\n',
+        restart_line='',
         ELE_OUTPUT="S11, S12, S22",
         NODES_OUTPUT="COOR1, COOR2",
         additional_outputs=[f"""** HISTORY OUTPUT: H-Set-y-negative
