@@ -2,7 +2,14 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-sim_nums =  [1003, 1005, 1008, 1009, 1013, 1015, 1018, 1109] #004, 6005, 6006, 6007, 6008]#4000, 4001, 4002]#, 2003, 2004]#, 2005, 2006, 2007, 2008]
+# sim_nums =  [1003, 1005, 1008, 1009, 1013, 1015, 1018, 1109] #004, 6005, 6006, 6007, 6008]#4000, 4001, 4002]#, 2003, 2004]#, 2005, 2006, 2007, 2008]
+sim_nums = [1076,
+1078,
+1079,
+1081,
+1085,
+1086,
+1088]
 
 # 1200, 1201, 1202, 1203, 1204, 1205, 1206, 1207, 1208, 1209,
             # 1210, 1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219]
@@ -44,7 +51,7 @@ def run_simulation(sim_num):
     return result
 
 if __name__ == "__main__":
-    num_cores = 1  # Set this to the number of cores you want to use
+    num_cores = 2  # Set this to the number of cores you want to use
 
     with ProcessPoolExecutor(max_workers=num_cores) as executor:
         futures = [executor.submit(run_simulation, sim_num) for sim_num in sim_nums]
