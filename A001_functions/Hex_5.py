@@ -3141,10 +3141,41 @@ class HexagonalMeshGenerator2(HexagonalMeshGenerator):
         # Rectangle (returns surface tag)
         rect_tag = gmsh.model.occ.addRectangle(_x0, _y0, 0, _x1 - _x0, _y1 - _y0)
 
-        # Disks for every hole (including partial ones)
+        # Disks for every hole (including partial ones).
+        #
+        # When a hole center sits exactly ON a domain edge line (x==0,
+        # x==L, y==0 or y==L) -- which happens for lattices where the
+        # spacing divides the domain size evenly and holes are cut at the
+        # edges (no edge padding) -- the resulting circle is exactly
+        # tangent to the rectangle edge along its cut, a numerically
+        # degenerate configuration for OCC's boolean cut. Even though the
+        # input geometry is mirror-symmetric between opposite edges,
+        # floating-point coordinates near 0 and near L are not equally
+        # spaced (denser near 0), so the boolean kernel can fragment the
+        # two edges' boundary curves differently (e.g. spurious extra
+        # curve segments on one edge but not its periodic counterpart),
+        # which then breaks LR/TB periodic meshing (mismatched curve
+        # counts, or "Cannot find periodic counterpart" errors). Nudge
+        # such edge-touching holes a tiny amount *into* the domain so the
+        # circle crosses the edge line at two distinct points instead of
+        # being exactly tangent to it. This is purely a construction-time
+        # workaround for gmsh/OCC -- it does not alter the physically
+        # reported hole_centers.
+        edge_eps = L * 1e-6
+        edge_tol = L * 1e-4
+
         disk_dimtags = []
         for cx, cy in self.hole_centers:
-            dtag = gmsh.model.occ.addDisk(cx, cy, 0, r, r)
+            gx, gy = cx, cy
+            if abs(gx - 0.0) < edge_tol:
+                gx += edge_eps
+            elif abs(gx - L) < edge_tol:
+                gx -= edge_eps
+            if abs(gy - 0.0) < edge_tol:
+                gy += edge_eps
+            elif abs(gy - L) < edge_tol:
+                gy -= edge_eps
+            dtag = gmsh.model.occ.addDisk(gx, gy, 0, r, r)
             disk_dimtags.append((2, dtag))
 
         # Boolean cut: rectangle − disks
@@ -3200,10 +3231,27 @@ class HexagonalMeshGenerator2(HexagonalMeshGenerator):
                 hole_curve_tags.append(tag)
 
             # --- classify by which edge BOTH endpoints lie on ----------------
-            both_on_left   = abs(sx - _x0) < tol_class and abs(ex - _x0) < tol_class
-            both_on_right  = abs(sx - _x1) < tol_class and abs(ex - _x1) < tol_class
-            both_on_bottom = abs(sy - _y0) < tol_class and abs(ey - _y0) < tol_class
-            both_on_top    = abs(sy - _y1) < tol_class and abs(ey - _y1) < tol_class
+            # Exclude hole-arc curves (`is_hole`) from edge classification:
+            # when a hole is cut exactly by the domain edge (no edge
+            # padding), the OCC boolean kernel is not guaranteed to
+            # fragment the resulting half-circle the same way on opposite
+            # edges (e.g. it may keep the whole half-circle as a single
+            # curve -- whose two endpoints both lie on the edge line -- on
+            # one side, while splitting the mirror-image half-circle into
+            # two quarter-arc curves on the other side, each with only one
+            # endpoint on the edge). Without this guard, such a curve
+            # would be miscounted as an extra "edge" curve on only one
+            # side, giving mismatched left/right (or bottom/top) curve
+            # counts and breaking periodic meshing even though the
+            # underlying hole pattern is genuinely periodic.
+            both_on_left   = (not is_hole and abs(sx - _x0) < tol_class
+                               and abs(ex - _x0) < tol_class)
+            both_on_right  = (not is_hole and abs(sx - _x1) < tol_class
+                               and abs(ex - _x1) < tol_class)
+            both_on_bottom = (not is_hole and abs(sy - _y0) < tol_class
+                               and abs(ey - _y0) < tol_class)
+            both_on_top    = (not is_hole and abs(sy - _y1) < tol_class
+                               and abs(ey - _y1) < tol_class)
 
             if both_on_bottom:
                 bottom_curves.append(tag)
@@ -4366,22 +4414,32 @@ class SquareMeshGenerator2(HexagonalMeshGenerator2):
         row_start = int(np.floor(-r / b)) - 1
         row_end = int(np.ceil((L + r) / b)) + 1
 
+        # Snap the base offset to remove floating-point noise (e.g. `L % a`
+        # for an `L` that is an exact multiple of `a` should be 0, not a
+        # tiny residual like 1e-17). Without this, mirror-symmetric hole
+        # centers near the left/right (or bottom/top) edges end up off by
+        # a few ULPs from each other, which can make the OCC boolean/mesh
+        # kernel fragment the two sides' boundary curves differently and
+        # break LR/TB periodicity.
+        if self.center_domain:
+            x_base = round((L % a) / 2, 12)
+        else:
+            x_base = round(a / 2, 12)
+
+        # Build hole-center columns from integer lattice indices (x_base +
+        # k*a) instead of repeated +=/-= accumulation, which avoids
+        # accumulated floating-point drift across many iterations and keeps
+        # positions exactly symmetric about the domain.
+        k_min = int(np.floor((-r - x_base) / a)) - 1
+        k_max = int(np.ceil((L + r - x_base) / a)) + 1
+
         centers = []
         for row in range(row_start, row_end + 1):
-            y = row * b
-            if self.center_domain:
-                x_base = (L % a) / 2
-            else:
-                x_base = a / 2
-
-            x = x_base
-            while x > -r:
-                x -= a
-
-            while x < L + r:
+            y = round(row * b, 12)
+            for k in range(k_min, k_max + 1):
+                x = round(x_base + k * a, 12)
                 if (x + r > 0 and x - r < L and y + r > 0 and y - r < L):
                     centers.append([x, y])
-                x += a
 
         if len(centers) == 0:
             warnings.warn("No holes overlap the domain with current parameters")
@@ -6491,10 +6549,18 @@ class RandomMeshGenerator(HexagonalMeshGenerator):
             if is_hole:
                 hole_curve_tags.append(tag)
 
-            both_on_left   = abs(sx - _x0) < tol_class and abs(ex - _x0) < tol_class
-            both_on_right  = abs(sx - _x1) < tol_class and abs(ex - _x1) < tol_class
-            both_on_bottom = abs(sy - _y0) < tol_class and abs(ey - _y0) < tol_class
-            both_on_top    = abs(sy - _y1) < tol_class and abs(ey - _y1) < tol_class
+            # Exclude hole-arc curves (`is_hole`) from edge classification --
+            # see the analogous guard in HexagonalMeshGenerator2.generate_mesh
+            # for the full rationale (OCC can fragment a hole cut exactly at
+            # the domain edge asymmetrically between opposite edges).
+            both_on_left   = (not is_hole and abs(sx - _x0) < tol_class
+                               and abs(ex - _x0) < tol_class)
+            both_on_right  = (not is_hole and abs(sx - _x1) < tol_class
+                               and abs(ex - _x1) < tol_class)
+            both_on_bottom = (not is_hole and abs(sy - _y0) < tol_class
+                               and abs(ey - _y0) < tol_class)
+            both_on_top    = (not is_hole and abs(sy - _y1) < tol_class
+                               and abs(ey - _y1) < tol_class)
 
             if both_on_bottom:
                 bottom_curves.append(tag)

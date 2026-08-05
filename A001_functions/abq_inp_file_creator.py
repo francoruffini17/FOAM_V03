@@ -879,64 +879,86 @@ def S6(input_name,output_name, OBJ):
 
             # 3) Corner equations
             #    BL=5, BR=8, TL=7, TR=6
-            BL = corner_BL + 1
-            BR = corner_BR + 1
-            TL = corner_TL + 1
-            TR = corner_TR + 1
+            # Some meshes (e.g. high-porosity / allow_cut geometries) have no
+            # single node sitting exactly at one or more geometric corners —
+            # the corner region is entirely consumed by a hole boundary, so
+            # boundary_nodes never records a node with two edge memberships.
+            # In that case the corner-tie equations below are skipped: DA,
+            # DB and DC are already fully (and consistently) determined by
+            # the LR/UL edge-pair equations above, so periodicity is still
+            # completely enforced without an explicit corner node.
+            _missing_corners = [
+                name for name, c in (
+                    ('BL', corner_BL), ('BR', corner_BR),
+                    ('TL', corner_TL), ('TR', corner_TR),
+                ) if c is None
+            ]
+            if _missing_corners:
+                print(
+                    "periodic='both': skipping corner-tie equations - "
+                    f"no mesh node found at corner(s) {', '.join(_missing_corners)} "
+                    "(likely cut away by a hole). DA/DB/DC remain fully "
+                    "constrained by the LR/UL edge equations."
+                )
+            else:
+                BL = corner_BL + 1
+                BR = corner_BR + 1
+                TL = corner_TL + 1
+                TR = corner_TR + 1
 
-            # u8 - u5 - DA = 0
-            file.write(f"** Constraint: Constraint-{con_n}\n")
-            file.write("*Equation\n")
-            file.write("3\n")
-            file.write(f"PERN-{BR}, 1, 1.\n")
-            file.write(f"PERN-{BL}, 1, -1.\n")
-            file.write(f"PERN-9999997, 1, -1.\n")
-            con_n += 1
+                # u8 - u5 - DA = 0
+                file.write(f"** Constraint: Constraint-{con_n}\n")
+                file.write("*Equation\n")
+                file.write("3\n")
+                file.write(f"PERN-{BR}, 1, 1.\n")
+                file.write(f"PERN-{BL}, 1, -1.\n")
+                file.write(f"PERN-9999997, 1, -1.\n")
+                con_n += 1
 
-            # v8 - v5 = 0
-            file.write(f"** Constraint: Constraint-{con_n}\n")
-            file.write("*Equation\n")
-            file.write("2\n")
-            file.write(f"PERN-{BR}, 2, 1.\n")
-            file.write(f"PERN-{BL}, 2, -1.\n")
-            con_n += 1
+                # v8 - v5 = 0
+                file.write(f"** Constraint: Constraint-{con_n}\n")
+                file.write("*Equation\n")
+                file.write("2\n")
+                file.write(f"PERN-{BR}, 2, 1.\n")
+                file.write(f"PERN-{BL}, 2, -1.\n")
+                con_n += 1
 
-            # u7 - u5 - DC = 0
-            file.write(f"** Constraint: Constraint-{con_n}\n")
-            file.write("*Equation\n")
-            file.write("3\n")
-            file.write(f"PERN-{TL}, 1, 1.\n")
-            file.write(f"PERN-{BL}, 1, -1.\n")
-            file.write(f"PERN-9999998, 1, -1.\n")
-            con_n += 1
+                # u7 - u5 - DC = 0
+                file.write(f"** Constraint: Constraint-{con_n}\n")
+                file.write("*Equation\n")
+                file.write("3\n")
+                file.write(f"PERN-{TL}, 1, 1.\n")
+                file.write(f"PERN-{BL}, 1, -1.\n")
+                file.write(f"PERN-9999998, 1, -1.\n")
+                con_n += 1
 
-            # v7 - v5 - DB = 0
-            file.write(f"** Constraint: Constraint-{con_n}\n")
-            file.write("*Equation\n")
-            file.write("3\n")
-            file.write(f"PERN-{TL}, 2, 1.\n")
-            file.write(f"PERN-{BL}, 2, -1.\n")
-            file.write(f"PERN-9999997, 2, -1.\n")
-            con_n += 1
+                # v7 - v5 - DB = 0
+                file.write(f"** Constraint: Constraint-{con_n}\n")
+                file.write("*Equation\n")
+                file.write("3\n")
+                file.write(f"PERN-{TL}, 2, 1.\n")
+                file.write(f"PERN-{BL}, 2, -1.\n")
+                file.write(f"PERN-9999997, 2, -1.\n")
+                con_n += 1
 
-            # u6 - u5 - DA - DC = 0
-            file.write(f"** Constraint: Constraint-{con_n}\n")
-            file.write("*Equation\n")
-            file.write("4\n")
-            file.write(f"PERN-{TR}, 1, 1.\n")
-            file.write(f"PERN-{BL}, 1, -1.\n")
-            file.write(f"PERN-9999997, 1, -1.\n")
-            file.write(f"PERN-9999998, 1, -1.\n")
-            con_n += 1
+                # u6 - u5 - DA - DC = 0
+                file.write(f"** Constraint: Constraint-{con_n}\n")
+                file.write("*Equation\n")
+                file.write("4\n")
+                file.write(f"PERN-{TR}, 1, 1.\n")
+                file.write(f"PERN-{BL}, 1, -1.\n")
+                file.write(f"PERN-9999997, 1, -1.\n")
+                file.write(f"PERN-9999998, 1, -1.\n")
+                con_n += 1
 
-            # v6 - v5 - DB = 0
-            file.write(f"** Constraint: Constraint-{con_n}\n")
-            file.write("*Equation\n")
-            file.write("3\n")
-            file.write(f"PERN-{TR}, 2, 1.\n")
-            file.write(f"PERN-{BL}, 2, -1.\n")
-            file.write(f"PERN-9999997, 2, -1.\n")
-            con_n += 1
+                # v6 - v5 - DB = 0
+                file.write(f"** Constraint: Constraint-{con_n}\n")
+                file.write("*Equation\n")
+                file.write("3\n")
+                file.write(f"PERN-{TR}, 2, 1.\n")
+                file.write(f"PERN-{BL}, 2, -1.\n")
+                file.write(f"PERN-9999997, 2, -1.\n")
+                con_n += 1
 
             file.write("** \n")
 
