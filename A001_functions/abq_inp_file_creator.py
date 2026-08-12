@@ -76,7 +76,45 @@ class data:
     periodic: str = 'none'
     explicit_dummy_node_mass: float = None
     bc_amplitude: str = None
+    material_model: str = 'linear'
+    material_model_Inclusions: str = 'linear'
+    C10: float = None
+    D1: float = None
+    C10_Inclusions: float = None
+    D1_Inclusions: float = None
 
+
+def neo_hookean_constants(E, nu):
+    """Convert isotropic linear-elastic (E, nu) to Abaqus neo-Hookean (C10, D1)."""
+    mu = E / (2 * (1 + nu))
+    C10 = mu / 2
+    K = E / (3 * (1 - 2 * nu))
+    D1 = 2 / K
+    return C10, D1
+
+
+def write_material_block(file, name, model, E, nu, C10=None, D1=None):
+    """
+    Write a *Material block using either a linear-elastic or a neo-Hookean
+    hyperelastic model.
+
+    model='linear'      -> *Elastic, E, nu
+    model='neo_hookean'  -> *Hyperelastic, neo hooke, C10, D1
+                            (C10/D1 derived from E, nu unless given explicitly)
+    """
+    file.write(f"*Material, name={name}\n")
+    if model == 'linear':
+        file.write("*Elastic\n")
+        file.write(f"{E}, {nu}\n")
+    elif model == 'neo_hookean':
+        if C10 is None or D1 is None:
+            C10_calc, D1_calc = neo_hookean_constants(E, nu)
+            C10 = C10_calc if C10 is None else C10
+            D1 = D1_calc if D1 is None else D1
+        file.write("*Hyperelastic, neo hooke\n")
+        file.write(f"{C10}, {D1}\n")
+    else:
+        raise ValueError(f"Unsupported material_model '{model}'. Use 'linear' or 'neo_hookean'.")
 
 
 def write_step_block(file,
@@ -1122,9 +1160,12 @@ def S6(input_name,output_name, OBJ):
 
         file.write("** MATERIALS\n")
         file.write("** \n")
-        file.write("*Material, name=Material-Foam\n")
-        file.write("*Elastic\n")
-        file.write(f"{OBJ.E}, {OBJ.nu}\n")
+        write_material_block(
+            file, "Material-Foam",
+            getattr(OBJ, 'material_model', 'linear'),
+            OBJ.E, OBJ.nu,
+            C10=getattr(OBJ, 'C10', None), D1=getattr(OBJ, 'D1', None)
+        )
         file.write(f"*Expansion\n")
         file.write(f"{OBJ.expansion_foam},\n")
         if OBJ.density_foam is not None:
@@ -1178,9 +1219,12 @@ def S6(input_name,output_name, OBJ):
         if OBJ.inclusions_present == True:
             file.write("** MATERIALS\n")
             file.write("** \n")
-            file.write("*Material, name=Material-Inclusions\n")
-            file.write("*Elastic\n")
-            file.write(f"{OBJ.E_Inclusions}, {OBJ.nu_Inclusions}\n")
+            write_material_block(
+                file, "Material-Inclusions",
+                getattr(OBJ, 'material_model_Inclusions', 'linear'),
+                OBJ.E_Inclusions, OBJ.nu_Inclusions,
+                C10=getattr(OBJ, 'C10_Inclusions', None), D1=getattr(OBJ, 'D1_Inclusions', None)
+            )
             file.write(f"*Expansion\n")
             file.write(f"{OBJ.expansion_Inclusions},\n")
 
