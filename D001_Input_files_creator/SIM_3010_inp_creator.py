@@ -29,7 +29,14 @@ from dataclasses import asdict
 #      snap-through is integrated through instead of diverged on.  The
 #      localization band is a physical outcome, not a damping artefact.
 #   2. No stabilization at all in Step-1 -> ALLSD stays flat at its Step-0
-#      value; ALLVD reports how much the HHT numerical damping absorbs.
+#      value (measured: 9.1e-5, i.e. 4.7e-6 of strain energy).
+#      NOTE: ALLVD is requested but is NOT a measure of the HHT numerical
+#      damping -- it reports material/dashpot viscous dissipation only, and
+#      reads exactly 0 here. `application=QUASI-STATIC` uses HHT-alpha with
+#      alpha ~ -0.41421 (MAXIMUM algorithmic dissipation), and that dissipation
+#      is not reported by any ALL* variable. It is the one artificial ingredient
+#      in this family that is not directly quantified -- validate it with a
+#      sensitivity run (see below) rather than by reading ALLVD.
 #   3. Mass scaling (see DENSITY below) so the snap has a resolvable duration.
 #   4. Field output 100 -> 200 frames (every 0.005 of the step) so the instant
 #      of localization is actually sampled in space.  History output stays at
@@ -44,6 +51,16 @@ from dataclasses import asdict
 # ACCEPTANCE CHECK after running:
 #   - ALLKE/ALLIE at the end of Step-1 should stay small (~1e-2 or below).
 #     If it is larger, the run is no longer quasi-static -> lower DENSITY.
+#   - SENSITIVITY CHECK for the two artificial ingredients (mass scaling and
+#     HHT numerical damping): re-run one sim with DENSITY/10, or with
+#     `application=TRANSIENT FIDELITY` (alpha = -0.05, far less algorithmic
+#     damping), and compare shear_mean(eps) and eps*. If eps* moves by only a
+#     few percent, neither ingredient is driving the result.
+#     Validated so far: over the strain range where the 2010's static runs
+#     survived (eps <= 0.148-0.167), shear_mean(eps) of 3011-3014 matches its
+#     2010's twin to <0.007% -- so the procedure change does not alter the
+#     physics pre-bifurcation. Post-bifurcation has no static reference by
+#     construction; that is the part the sensitivity run covers.
 #   - If a run still aborts at roughly the same strain as its 2010's twin,
 #     the failure is NOT the bifurcation: inspect the .msg (do NOT run
 #     run_abq_clean.sh first).  Element distortion / negative Jacobian there
@@ -70,6 +87,18 @@ DENSITY = 1e-6
 
 # Step-0 stabilization is unchanged from the 2010's.
 factor = 2e-5
+
+U_RAMP = -5
+
+# Applied macroscopic compression on the periodic driver node, in mm (cell is
+# 20 mm, so -5 = 25% nominal strain, same as the 2010's).
+#
+# PAPER_PLAN.md sec.7: the bar is not "reach t = 1", it is that argmin(shear_mean)
+# lands INTERIOR so eps* is measurable.  SIM_2010 (P=0) hit its limit by 18.6%
+# strain, but SIM_2016 reached 22.8% with the minimum still on the last frame --
+# so for the mid-pressure runs the limit is past 22.8% and may be past 25%.
+# If the pilot completes the ramp and shear_mean still bottoms out on the last
+# frame, extend this (SIM_1100's uses -8) and regenerate.
 
 Ps = [0.0] + [0.04 * (np.sqrt(2) ** i) for i in range(9)]
 
@@ -148,7 +177,7 @@ for P in Ps:
         new_boundary=True,
         corner_xnyn_bc=[0, 0, None, None, None, None],
         corner_xpyn_bc=[None, 0, None, None, None, None],
-        BC_9999997=[None, -5, None, None, None, None],
+        BC_9999997=[None, U_RAMP, None, None, None, None],
         time_interval_out=0.005,
         frequ_out=100,
         out_frames=200,
