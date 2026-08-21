@@ -26,14 +26,15 @@ fresh (non-restart) job on the identical model, so the workaround is:
      - the model definition and Step-0 (gas pressurization) are copied
        verbatim (output requests stripped - the replay writes no field
        output, so no multi-GB odb is duplicated);
-     - Step-1 is split into N equal segments with the *Boundary magnitudes
-       ramped piecewise-linearly to the same totals (identical load path);
+     - Step-1 is split into N equal segments while preserving its *Static or
+       implicit *Dynamic procedure, with the *Boundary magnitudes ramped
+       piecewise-linearly to the same totals;
      - after Step-0 and after every segment a linear-perturbation step with
        *Matrix Generate, STIFFNESS / *Matrix Output, STIFFNESS is inserted.
        Perturbation steps do not alter the base state, so the static
        solution path is the same as the original single-step run.
-  2. Run the replay job once (this re-solves the statics - the price of the
-     restart bug - but is fully automatic and parallelizes across sims).
+  2. Run the replay job once (this re-solves the static or dynamic loading
+     path - the price of the restart bug - but is fully automatic).
   3. Parse each JOB_STIF{n}.mtx into a sparse matrix, symmetrize, and
      compute the n_eigenvalues smallest eigenvalues with
      scipy.sparse.linalg.eigsh (sigma=0 shift-invert: one sparse LU
@@ -63,8 +64,8 @@ directory (or in an EIGBAK/ backup subdirectory), reading the segment
 duration from the existing *_EIGJOB.inp.
 
 Usage:
-    python -m A001_functions.stiffness_eigen <SIM_NUMBER> [n_segments] [until] [cpus] [n_eigenvalues] [n_workers]
-    python -m A001_functions.stiffness_eigen <SIM_NUMBER> --salvage [n_eigenvalues] [n_workers]
+    python -m A001_functions.stiffness_eigen <SIM_NUMBER> [n_segments] [until] [cpus] [n_eigenvalues] [n_workers] [return_eigenvectors]
+    python -m A001_functions.stiffness_eigen <SIM_NUMBER> --salvage [n_eigenvalues] [n_workers] [return_eigenvectors]
 
     n_segments    number of matrix-extraction points along Step-1 (default 100)
     until         fraction of Step-1 to replay, 0 < until <= 1 (default 1.0;
@@ -75,6 +76,9 @@ Usage:
                   free, since eigsh reuses the same sparse LU factorization)
     n_workers     parallel worker processes for the parse+eigsh phase
                   (default min(8, cpu count))
+    return_eigenvectors
+                  1 writes eigenvectors to DATA_PICK_*_EIGV.pkl; 0 keeps
+                  eigenvalues only (default 0)
 """
 import glob
 import json
@@ -215,18 +219,29 @@ def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1
     model_lines = lines[:s0]
     step0_lines = _strip_output_requests(lines[s0:end_step_index(s0) + 1])
 
-    # Step-1 header: the *Step keyword line, the *Static keyword line and its
-    # data line (initial dt, period, min dt, max dt).
+    # Step-1 header: preserve either the static or implicit-dynamic procedure
+    # and its data line (initial dt, period, min dt, max dt).  Linear
+    # perturbation matrix steps do not advance time or change the base state,
+    # so a dynamic trajectory can continue after each matrix extraction.
     step_kw = next(i for i in range(s1, len(lines))
                    if lines[i].lstrip().lower().startswith('*step'))
-    static_kw = next(i for i in range(step_kw, len(lines))
-                     if lines[i].lstrip().lower().startswith('*static'))
-    static_data = next(i for i in range(static_kw + 1, len(lines))
-                       if lines[i].strip() and not lines[i].lstrip().startswith('*'))
+    procedure_kw = next(
+        (i for i in range(step_kw, len(lines))
+         if lines[i].lstrip().lower().startswith(('*static', '*dynamic'))),
+        None,
+    )
+    if procedure_kw is None:
+        raise ValueError('Step {!r} must use *Static or implicit *Dynamic'.format(step1_name))
+    procedure_data = next(i for i in range(procedure_kw + 1, len(lines))
+                          if lines[i].strip() and not lines[i].lstrip().startswith('*'))
 
     step_line = lines[step_kw].strip()
-    static_line = lines[static_kw].strip()
-    dt_init, period, dt_min, dt_max = [float(p) for p in lines[static_data].split(',')]
+    procedure_line = lines[procedure_kw].strip()
+    procedure_values = [float(p) for p in lines[procedure_data].split(',') if p.strip()]
+    if len(procedure_values) != 4:
+        raise ValueError('{} data line must contain initial dt, period, min dt, max dt'.format(
+            procedure_line.split(',')[0]))
+    dt_init, period, dt_min, dt_max = procedure_values
 
     boundary_lines = extract_boundary_lines(inp_path, step1_name)
 
@@ -245,11 +260,8 @@ def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1
     for k in range(1, n_run + 1):
         name = 'EIGSEG-{}'.format(k)
         seg_step = re.sub(r'name=[^,]+', 'name=' + name, step_line)
-        # constant-factor stabilization (no allsdtol) forbids continue=YES,
-        # so each segment recomputes its damping factor exactly like the
-        # original continue=NO step does
         out.append(seg_step)
-        out.append(static_line)
+        out.append(procedure_line)
         out.append('{:g}, {:g}, {:g}, {:g}'.format(min(dt, dt_max), dt, dt_min, dt_max))
         out.append('*Boundary, op=NEW')
         factor = float(k) / n_segments
@@ -369,7 +381,8 @@ def parse_coordinate_mtx(path):
     return K, dof_labels
 
 
-def smallest_eigenvalues(K, k=20, sigma=0.0, fallback_sigmas=(-1e-6, -1.0)):
+def smallest_eigenvalues(K, k=20, sigma=0.0, fallback_sigmas=(-1e-6, -1.0),
+                         return_eigenvectors=False):
     """The k smallest eigenvalues (ascending) of the symmetric part of sparse
     K via shift-invert Lanczos. The steps use the unsymmetric solver (fluid
     cavity + stabilization), so K may be slightly unsymmetric; stability of
@@ -386,6 +399,10 @@ def smallest_eigenvalues(K, k=20, sigma=0.0, fallback_sigmas=(-1e-6, -1.0)):
     last_err = None
     for s in sigmas_to_try:
         try:
+            if return_eigenvectors:
+                vals, vecs = eigsh(Ks, k=k, sigma=s, which='LM', return_eigenvectors=True)
+                order = np.argsort(vals)
+                return np.sort(vals), vecs[:, order]
             vals = eigsh(Ks, k=k, sigma=s, which='LM', return_eigenvectors=False)
             return np.sort(vals)
         except Exception as e:  # singular shift, retry with an offset
@@ -407,16 +424,21 @@ def _mtx_index_to_time(idx, dt):
 
 
 def _eigen_worker(args):
-    """Parse one .mtx and return (index, eigenvalues list). Module-level so
-    multiprocessing can pickle it."""
-    mtx, n_eigenvalues = args
-    K, _ = parse_coordinate_mtx(mtx)
+    """Parse one .mtx and return eigenvalues, and optionally eigenvectors."""
+    mtx, n_eigenvalues, return_eigenvectors = args
+    K, labels = parse_coordinate_mtx(mtx)
+    if return_eigenvectors:
+        eigvals, eigvecs = smallest_eigenvalues(K, k=n_eigenvalues,
+                                                return_eigenvectors=True)
+        # Keep the dense mode matrix as an ndarray.  Converting millions of
+        # entries to Python floats greatly inflates RAM and pickle size.
+        return _mtx_index(mtx), eigvals.tolist(), eigvecs, labels
     eigvals = smallest_eigenvalues(K, k=n_eigenvalues)
-    return _mtx_index(mtx), eigvals.tolist()
+    return _mtx_index(mtx), eigvals.tolist(), None, labels
 
 
 def _extract_eigenvalues(mtx_files, dt, n_eigenvalues=20, n_workers=None,
-                         delete_after=False):
+                         delete_after=False, return_eigenvectors=False):
     """Run parse + eigsh over the given .mtx files with a process pool and
     return the results list sorted by time. Each file is deleted right after
     its eigenvalues are extracted when delete_after=True (the files are
@@ -426,46 +448,76 @@ def _extract_eigenvalues(mtx_files, dt, n_eigenvalues=20, n_workers=None,
     n_workers = max(1, min(int(n_workers), len(mtx_files) or 1))
 
     results = []
-    jobs = [(m, n_eigenvalues) for m in mtx_files]
+    dof_labels = None
+    jobs = [(m, n_eigenvalues, return_eigenvectors) for m in mtx_files]
 
-    def _collect(idx, eigvals):
+    def _collect(idx, eigvals, eigvecs=None, labels=None):
+        nonlocal dof_labels
         t = _mtx_index_to_time(idx, dt)
         if t is None:
             print('WARNING: unexpected matrix step number {} - skipping'.format(idx))
             return
-        results.append({'matrix_index': idx, 'time': t, 'eigenvalues': eigvals})
+        entry = {'matrix_index': idx, 'time': t, 'eigenvalues': eigvals}
+        if eigvecs is not None:
+            entry['eigenvectors'] = eigvecs
+        if labels is not None and dof_labels is None:
+            dof_labels = labels
+        results.append(entry)
         print('t = {:.4f}  lambda_min = {:.6e}  ({} eigenvalues)'.format(
             t, eigvals[0], len(eigvals)), flush=True)
 
     by_index = {_mtx_index(m): m for m in mtx_files}
     if n_workers == 1:
         for job in jobs:
-            idx, eigvals = _eigen_worker(job)
-            _collect(idx, eigvals)
+            idx, eigvals, eigvecs, labels = _eigen_worker(job)
+            _collect(idx, eigvals, eigvecs, labels)
             if delete_after:
                 os.remove(by_index[idx])
     else:
         with multiprocessing.Pool(n_workers) as pool:
-            for idx, eigvals in pool.imap_unordered(_eigen_worker, jobs):
-                _collect(idx, eigvals)
+            for idx, eigvals, eigvecs, labels in pool.imap_unordered(_eigen_worker, jobs):
+                _collect(idx, eigvals, eigvecs, labels)
                 if delete_after:
                     os.remove(by_index[idx])
 
     results.sort(key=lambda d: d['time'])
-    return results
+    return results, dof_labels
+
+
+def _write_eig_vectors_pkl(sim_num, results, dof_labels):
+    out_path = 'I001_Results/DATA_PICK_{:03d}_EIGV.pkl'.format(sim_num)
+    os.makedirs('I001_Results', exist_ok=True)
+    payload = {
+        'source_file': out_path.replace('_EIGV.pkl', '_EIG.json'),
+        'dof_labels': dof_labels,
+        't': [d['time'] for d in results],
+        'matrix_index': [d['matrix_index'] for d in results],
+        'eigenvalues': [d['eigenvalues'] for d in results],
+        'eigenvectors': [d.get('eigenvectors') for d in results],
+    }
+    with open(out_path, 'wb') as f:
+        pickle.dump(payload, f)
+    print('Wrote eigenvectors to {}'.format(out_path))
+    return out_path
 
 
 def _write_eig_json(sim_num, results):
     out_path = 'I001_Results/DATA_PICK_{:03d}_EIG.json'.format(sim_num)
     os.makedirs('I001_Results', exist_ok=True)
+    # Eigenvectors are intentionally kept out of JSON: for realistic meshes
+    # they are very large and are already stored compactly in EIGV.pkl.
+    scalar_results = [
+        {key: value for key, value in entry.items() if key != 'eigenvectors'}
+        for entry in results
+    ]
     with open(out_path, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(scalar_results, f, indent=2)
     print('Wrote {} eigenvalues to {}'.format(len(results), out_path))
     return out_path
 
 
 def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
-        n_eigenvalues=20, n_workers=None):
+        n_eigenvalues=20, n_workers=None, return_eigenvectors=False):
     """Full pipeline for SIM_{sim_num}: build the replay job, run it, parse
     every stiffness matrix, and write
     I001_Results/DATA_PICK_{sim_num}_EIG.json with
@@ -502,9 +554,10 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
         print('WARNING: only {} of {} stiffness matrices were written - the '
               'job probably stopped early.'.format(len(mtx_files), len(schedule)))
 
-    results = _extract_eigenvalues(mtx_files, dt, n_eigenvalues=n_eigenvalues,
-                                   n_workers=n_workers,
-                                   delete_after=not keep_files)
+    results, dof_labels = _extract_eigenvalues(
+        mtx_files, dt, n_eigenvalues=n_eigenvalues,
+        n_workers=n_workers, delete_after=not keep_files,
+        return_eigenvectors=return_eigenvectors)
 
     if not keep_files:
         for p in glob.glob('{}/{}*'.format(sim_dir, eig_job)):
@@ -516,6 +569,8 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
                            '{}/{}.dat'.format(eig_job, sim_dir, eig_job))
 
     _write_eig_json(sim_num, results)
+    if return_eigenvectors:
+        _write_eig_vectors_pkl(sim_num, results, dof_labels)
     return results
 
 
@@ -534,7 +589,8 @@ def _segment_dt_from_replay_inp(eig_inp):
     return float(data.split(',')[1])
 
 
-def salvage(sim_num, n_eigenvalues=20, n_workers=None, keep_files=True):
+def salvage(sim_num, n_eigenvalues=20, n_workers=None, keep_files=True,
+            return_eigenvectors=False):
     """Extract eigenvalues from the .mtx files an earlier (possibly failed or
     crashed) replay run left in E001_Simulations/SIM_{sim_num}/ - or in its
     EIGBAK/ backup subdirectory - without re-running Abaqus. Writes the same
@@ -559,13 +615,16 @@ def salvage(sim_num, n_eigenvalues=20, n_workers=None, keep_files=True):
     print('Salvaging {} stiffness matrices from {} (segment dt = {:g})'.format(
         len(mtx_files), sim_dir, dt))
 
-    results = _extract_eigenvalues(mtx_files, dt, n_eigenvalues=n_eigenvalues,
-                                   n_workers=n_workers,
-                                   delete_after=not keep_files)
+    results, dof_labels = _extract_eigenvalues(
+        mtx_files, dt, n_eigenvalues=n_eigenvalues,
+        n_workers=n_workers, delete_after=not keep_files,
+        return_eigenvectors=return_eigenvectors)
     if not results:
         raise RuntimeError('No eigenvalues could be extracted from the '
                            'salvaged matrices.')
     _write_eig_json(sim_num, results)
+    if return_eigenvectors:
+        _write_eig_vectors_pkl(sim_num, results, dof_labels)
     return results
 
 
@@ -594,6 +653,10 @@ def create_PKL_E(sim_num: int, results_dir: str = "I001_Results", output_path: s
     are already safely packaged in the .pkl at this point, none of those
     files are needed any more - delete_mtx (default True) sweeps them up
     (including any EIGBAK/ salvage backup).
+
+    If DATA_PICK_*_EIGV.pkl exists, DATA_E includes its path and DOF labels;
+    the mode arrays remain in that dedicated file to avoid duplicating a
+    potentially multi-gigabyte payload.
     """
     eig_json_path = f"{results_dir}/DATA_PICK_{sim_num:03d}_EIG.json"
     with open(eig_json_path) as f:
@@ -604,6 +667,11 @@ def create_PKL_E(sim_num: int, results_dir: str = "I001_Results", output_path: s
                          f"{sim_num})")
 
     eig_data = sorted(eig_data, key=lambda d: d['time'])
+    eig_vec_path = f"{results_dir}/DATA_PICK_{sim_num:03d}_EIGV.pkl"
+    eig_vec_data = None
+    if os.path.exists(eig_vec_path):
+        with open(eig_vec_path, 'rb') as f:
+            eig_vec_data = pickle.load(f)
 
     DATA_E = {
         'source_file': eig_json_path,
@@ -612,6 +680,11 @@ def create_PKL_E(sim_num: int, results_dir: str = "I001_Results", output_path: s
         'eigenvalues': [d['eigenvalues'] for d in eig_data],
         'lambda_min': [d['eigenvalues'][0] for d in eig_data],
     }
+    if eig_vec_data is not None:
+        DATA_E['dof_labels'] = eig_vec_data.get('dof_labels')
+        # Keep the large mode arrays in their dedicated file instead of
+        # duplicating them in DATA_PICK_*_E.pkl.
+        DATA_E['eigenvectors_file'] = eig_vec_path
 
     if output_path is None:
         output_path = f"{results_dir}/DATA_PICK_{sim_num:03d}_E.pkl"
@@ -643,12 +716,16 @@ if __name__ == '__main__':
     if do_salvage:
         n_eig = int(args[1]) if len(args) > 1 else 20
         workers = int(args[2]) if len(args) > 2 else None
-        salvage(sim, n_eigenvalues=n_eig, n_workers=workers)
+        return_vectors = bool(int(args[3])) if len(args) > 3 else False
+        salvage(sim, n_eigenvalues=n_eig, n_workers=workers,
+                return_eigenvectors=return_vectors)
     else:
         n_seg = int(args[1]) if len(args) > 1 else 100
         until_frac = float(args[2]) if len(args) > 2 else 1.0
         n_cpus = int(args[3]) if len(args) > 3 else 1
         n_eig = int(args[4]) if len(args) > 4 else 20
         workers = int(args[5]) if len(args) > 5 else None
+        return_vectors = bool(int(args[6])) if len(args) > 6 else False
         run(sim, n_segments=n_seg, until=until_frac, cpus=n_cpus,
-            n_eigenvalues=n_eig, n_workers=workers)
+            n_eigenvalues=n_eig, n_workers=workers,
+            return_eigenvectors=return_vectors)

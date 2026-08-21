@@ -1473,6 +1473,28 @@ class frame_variable:
     localization_index: int = None  # Frame index of the localization point; computed automatically per-sim when mark_localization is True
 
 
+@dataclass
+class frame_pressure_histogram:
+    dpi: int = 100
+    title: str = None
+    xlabel: str = 'Element value'
+    ylabel: str = 'Probability density'
+    save_path: str = None
+    figsize: list[float] = None
+    num_frames: int = None
+    file_key: str = 'B'
+    quantity: str = 'pressure'
+    bins: int = 60
+    density: bool = True
+    xlim: tuple = None
+    ylim: tuple = None
+    grid: bool = True
+    show_mean: bool = True
+    mark_localization: bool = False
+    localization_index: int = None
+    subtitle: str = None
+
+
 
 def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
     def der(y, x, n=1):
@@ -1667,6 +1689,164 @@ def create_variable_multiple_frames(sim_num, T , save_path = None, frames_format
         create_variable_frame(pkl_x_obj, T, pkl_y_obj=pkl_y_obj)
 
 
+def _load_pickle_with_redirect(path):
+    """Load a pickle from the local results tree or from I001_Results/AAA_fwd."""
+    if os.path.exists(path):
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+
+    results_dir = 'I001_Results'
+    fwd_file = os.path.join(results_dir, 'AAA_fwd')
+    if os.path.exists(fwd_file):
+        with open(fwd_file) as f:
+            fwd_dir = f.read().strip()
+        fwd_path = os.path.join(fwd_dir, os.path.relpath(path, results_dir))
+        if os.path.exists(fwd_path):
+            with open(fwd_path, 'rb') as f:
+                return pickle.load(f)
+    return None
+
+
+_HIST_SOURCE_CACHE = {}
+
+
+def _pressure_matrix_from_B(data_B):
+    """Return element pressure p_e(t) from DATA_PICK_*_B.pkl."""
+    elem_ids = list(data_B['S11'].keys())
+    s11_all = np.array([data_B['S11'][e] for e in elem_ids], dtype=float)
+    s22_all = np.array([data_B['S22'][e] for e in elem_ids], dtype=float)
+    p_ip = -(s11_all[:, 0::2, :] + s22_all[:, 0::2, :]) / 2.0
+    return p_ip.mean(axis=1)
+
+
+def _hist_matrix_from_tp2(tp2, quantity):
+    def series_to_matrix(series_map):
+        elem_ids = list(series_map.keys())
+        first = series_map[elem_ids[0]] if elem_ids else {}
+        if isinstance(first, dict):
+            frame_keys = sorted(first.keys())
+            return np.array(
+                [[series_map[eid][fi] for fi in frame_keys] for eid in elem_ids],
+                dtype=float,
+            )
+        return np.array([series_map[eid] for eid in elem_ids], dtype=float)
+
+    if quantity == 'shear':
+        return series_to_matrix(tp2['shear'])
+    if quantity == 'J':
+        return series_to_matrix(tp2['J'])
+    if quantity in ('normalized_areas', 'areas'):
+        area_map = tp2['time_variant']['normalized_areas' if quantity == 'normalized_areas' else 'areas']
+        return series_to_matrix(area_map)
+    if quantity == 'distortion':
+        shear = _hist_matrix_from_tp2(tp2, 'shear')
+        J = _hist_matrix_from_tp2(tp2, 'J')
+        return shear - np.abs(J)
+    raise ValueError(f"Unsupported histogram quantity: {quantity}")
+
+
+def _load_hist_source(sim_num, file_key):
+    cache_key = (sim_num, file_key)
+    if cache_key in _HIST_SOURCE_CACHE:
+        return _HIST_SOURCE_CACHE[cache_key]
+
+    if file_key == 'B':
+        path = _load_pickle_with_redirect(f'I001_Results/DATA_PICK_{sim_num:03d}_B.pkl')
+    elif file_key == 'TP2':
+        path = _load_pickle_with_redirect(f'I001_Results/DATA_PICK_{sim_num:03d}_TP2.pkl')
+    else:
+        raise ValueError(f'Unsupported histogram source file key: {file_key}')
+
+    _HIST_SOURCE_CACHE[cache_key] = path
+    return path
+
+
+def create_histogram_frame(values_matrix, T, ti, bins, frame_label=None):
+    if T.figsize is not None:
+        plt.figure(figsize=T.figsize)
+    else:
+        plt.figure(figsize=(5, 4))
+
+    vals = np.asarray(values_matrix[:, ti], dtype=float)
+    vals = vals[np.isfinite(vals)]
+
+    if len(vals) == 0:
+        vals = np.array([0.0])
+
+    plt.hist(vals, bins=bins, histtype='step', density=T.density, linewidth=1.5,
+             color='tab:blue')
+
+    if getattr(T, 'show_mean', True):
+        plt.axvline(vals.mean(), color='tab:red', linestyle='--', linewidth=1.3, alpha=0.85)
+
+    plt.axvline(0.0, color='k', linestyle=':', linewidth=1.0, alpha=0.35)
+
+    title = T.title if T.title is not None else 'Element pressure distribution'
+    if frame_label is not None:
+        title = f'{title}\n{frame_label}'
+    plt.title(title)
+
+    if T.xlabel is not None:
+        plt.xlabel(T.xlabel)
+    if T.ylabel is not None:
+        plt.ylabel(T.ylabel)
+
+    if getattr(T, 'grid', True):
+        plt.grid(True, alpha=0.3)
+
+    if T.xlim is not None:
+        plt.xlim(T.xlim)
+    if T.ylim is not None:
+        plt.ylim(T.ylim)
+
+    if getattr(T, 'mark_localization', False) and getattr(T, 'localization_index', None) == ti:
+        plt.text(0.02, 0.95, 'Localization A', transform=plt.gca().transAxes,
+                 ha='left', va='top', fontsize=10,
+                 bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+
+    if T.save_path:
+        plt.savefig(T.save_path, dpi=T.dpi, bbox_inches='tight')
+        plt.close()
+        print(f"Plot saved to {T.save_path}")
+    else:
+        plt.show()
+
+
+def create_pressure_histogram_multiple_frames(sim_num, T, save_path=None, frames_format='png'):
+    data = _load_hist_source(sim_num, T.file_key)
+    if data is None:
+        print(f"Warning: histogram source not found for SIM {sim_num} ({T.file_key})")
+        return
+
+    if T.file_key == 'B':
+        values = _pressure_matrix_from_B(data)
+    else:
+        values = _hist_matrix_from_tp2(data, T.quantity)
+
+    total_frames = values.shape[1]
+    if getattr(T, 'num_frames', None) is not None and T.num_frames is not None and T.num_frames < total_frames:
+        indices = np.linspace(0, total_frames - 1, T.num_frames, dtype=int)
+    else:
+        indices = range(total_frames)
+
+    os.makedirs(save_path, exist_ok=True)
+
+    vmin = np.nanmin(values)
+    vmax = np.nanmax(values)
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
+        bins = np.linspace(-1.0, 1.0, getattr(T, 'bins', 60) + 1)
+    else:
+        bins = np.linspace(vmin, vmax, getattr(T, 'bins', 60) + 1)
+
+    loc_idx = _localization_index_from_shear_min(sim_num) if getattr(T, 'mark_localization', False) else None
+    T.localization_index = loc_idx
+
+    for ti in indices:
+        T.save_path = os.path.join(save_path, f'frame_{ti:08d}.{frames_format}')
+        frame_label = f'frame {ti + 1}/{total_frames}'
+        create_histogram_frame(values, T, ti=ti, bins=bins, frame_label=frame_label)
+
+
 
 
 
@@ -1842,6 +2022,7 @@ def _create_single_frame_object(args):
         'T1A': create_animation_T1_multiple_frames,
         'Q1A': create_animation_Q1_multiple_frames,
         'TP1A': create_animation_TP1_multiple_frames,
+        'PH':  create_pressure_histogram_multiple_frames,
     }
 
     if frame_type not in frame_functions or obj is None:
@@ -1892,6 +2073,7 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
         'T1A': create_animation_T1_multiple_frames,
         'Q1A': create_animation_Q1_multiple_frames,
         'TP1A': create_animation_TP1_multiple_frames,
+        'PH': create_pressure_histogram_multiple_frames,
     }
 
     tasks = []
@@ -1917,6 +2099,9 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
             ft, obj, *_ = task
             if ft == 'V' and hasattr(obj, 'file_key_y'):
                 key = (getattr(obj, 'file_key_x', 'A2'), getattr(obj, 'file_key_y', 'A2'))
+                v_groups.setdefault(key, []).append(task)
+            elif ft == 'PH':
+                key = ('PH', getattr(obj, 'file_key', 'B'))
                 v_groups.setdefault(key, []).append(task)
             else:
                 other_tasks.append([task])
@@ -2104,5 +2289,3 @@ def create_vid_from_frames_for_sim(sim_num, SCONF):
     output_path = f"{base}_SIM_{sim_num:03d}{ext}"
 
     create_vid_from_frames(frame_pattern=frame_pattern, output_path=output_path, frame_rate=SCONF.frame_rate, codec=SCONF.codec, delete_frames=SCONF.delete_concat_frames_after_video, scale_width=getattr(SCONF, 'scale_width', None))
-
-

@@ -84,7 +84,7 @@ Step flags (default: n):
   RUN_EIGEN=y|n         Run stiffness-matrix min-eigenvalue extraction
                         (produces DATA_PICK_*_EIG.json for PKL E via a
                         standalone replay job - needs only the sim's .inp,
-                        not the odb/csv; re-solves the statics with cpus=N)
+                        not the odb/csv; re-solves the loading path with cpus=N)
   RUN_REDUCE=y|n        Run Reduce_resultsV20
   RUN_VIDEO=y|n         Run Video_executorV20
 
@@ -105,6 +105,12 @@ Parallelism (default: 1):
 Abaqus solver:
   cpus=N                CPUs per solver job (default: 1)
   ABQ_CMD=<path>        Override Abaqus executable
+
+Eigen extraction:
+  EIGEN_SEGMENTS=N       Matrix snapshots along Step-1 (default: 100)
+  N_EIGENVALUES=N       Eigenpairs retained per snapshot (default: 20)
+  EIGEN_WORKERS=N       Parallel matrix/eigensolver workers (default: 8)
+  EIGENVECTORS=y|n      Store eigenvectors in DATA_PICK_*_EIGV.pkl (default: n)
 
 ABQ extraction:
   DELETE_ODB=y|n        Delete ODB after extraction (default: n)
@@ -153,6 +159,7 @@ CONTINUE_ON_SOLVER_ERROR="n"
 PAR_SIMULATIONS=1; PAR_ABQ=1; PAR_EIGEN=1; PAR_RED=1; PAR_VID=1
 START_DELAY=120
 CPUS=1; DELETE_ODB="n"; MOVE_FOLDER="n"; MOVE_DEST=""
+EIGEN_SEGMENTS=100; N_EIGENVALUES=20; EIGEN_WORKERS=8; EIGENVECTORS="n"
 VIDEOS_PROPERTIES_FILES="Video_properties0001"
 
 declare -A OUTPUT_OPTIONS=(
@@ -185,6 +192,10 @@ for arg in "$@"; do
             RUN_REDUCE)      [[ "$value" == y || "$value" == n ]] && RUN_REDUCE="$value" ;;
             RUN_VIDEO)       [[ "$value" == y || "$value" == n ]] && RUN_VIDEO="$value" ;;
             cpus)            [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] && CPUS="$value" ;;
+            EIGEN_SEGMENTS)   [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] && EIGEN_SEGMENTS="$value" ;;
+            N_EIGENVALUES)    [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] && N_EIGENVALUES="$value" ;;
+            EIGEN_WORKERS)    [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] && EIGEN_WORKERS="$value" ;;
+            EIGENVECTORS)     [[ "$value" == y || "$value" == n ]] && EIGENVECTORS="$value" ;;
             DELETE_ODB)      [[ "$value" == y || "$value" == n ]] && DELETE_ODB="$value" ;;
             MOVE_FOLDER)     [[ "$value" == y || "$value" == n ]] && MOVE_FOLDER="$value" ;;
             MOVE_DEST)       MOVE_DEST="$value" ;;
@@ -267,7 +278,10 @@ run_eigen() {
     [[ -d "$sim_path" ]] || { printf "Warning: %s not found. Skipping eigenvalue extraction.\n" "$sim_path" >&2; return 1; }
     printf "Eigen: Starting stiffness-matrix eigenvalue extraction for %s ...\n" "$sim"
 
-    python -m A001_functions.stiffness_eigen "$sim_number" 100 1.0 "$CPUS" \
+    local return_vectors=0
+    [[ "$EIGENVECTORS" == y ]] && return_vectors=1
+    python -m A001_functions.stiffness_eigen "$sim_number" "$EIGEN_SEGMENTS" 1.0 "$CPUS" \
+        "$N_EIGENVALUES" "$EIGEN_WORKERS" "$return_vectors" \
         > "logs/SIM_${sim_number}_eigen.log" 2>&1
     local status=$?
 
