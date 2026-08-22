@@ -1495,6 +1495,27 @@ class frame_pressure_histogram:
     subtitle: str = None
 
 
+@dataclass
+class frame_eigenmode:
+    """Render one tangent-stiffness eigenmode on the deformed foam mesh."""
+    dpi: int = 120
+    figsize: tuple = (14, 8)
+    save_path: str = None
+    num_frames: int = None
+    mode_index: int = 0
+    xlim: tuple = (-2, 22)
+    ylim: tuple = (-2, 22)
+    cmap_displacement: str = 'magma'
+    cmap_pressure: str = 'coolwarm'
+    node_size: float = 0.55
+    cavity_size: float = 90.0
+    quiver_grid: int = 18
+    arrow_length: float = 0.65
+    sign_align: bool = True
+    show_eigenvalue_history: bool = True
+    mesh_file: str = None
+
+
 
 def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
     def der(y, x, n=1):
@@ -1847,6 +1868,219 @@ def create_pressure_histogram_multiple_frames(sim_num, T, save_path=None, frames
         create_histogram_frame(values, T, ti=ti, bins=bins, frame_label=frame_label)
 
 
+def _eigenmode_mesh_path(sim_num, T):
+    if getattr(T, 'mesh_file', None):
+        return T.mesh_file
+    obj_path = f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json'
+    with open(obj_path) as f:
+        return json.load(f)['input_name']
+
+
+def _eigenmode_row_maps(dof_labels, coordinate_node_count):
+    """Map matrix rows to part-node displacement rows and cavity DOF rows.
+
+    Matrix output gives globally unique labels.  In this model the cavity
+    reference nodes precede the part nodes, so the structural-label offset is
+    exactly the number of DOF-8 cavity nodes.  Three trailing driver nodes do
+    not have coordinate output and are omitted from the spatial plot.
+    """
+    labels = np.asarray(dof_labels, dtype=np.int64)
+    cavity_nodes = np.sort(np.unique(labels[labels[:, 1] == 8, 0]))
+    structural_offset = len(cavity_nodes)
+
+    ux_row = np.full(coordinate_node_count + 1, -1, dtype=np.int64)
+    uy_row = np.full(coordinate_node_count + 1, -1, dtype=np.int64)
+    for dof, target in ((1, ux_row), (2, uy_row)):
+        rows = np.flatnonzero(labels[:, 1] == dof)
+        part_nodes = labels[rows, 0] - structural_offset
+        valid = (part_nodes >= 1) & (part_nodes <= coordinate_node_count)
+        target[part_nodes[valid]] = rows[valid]
+
+    active_nodes = np.flatnonzero((ux_row >= 0) | (uy_row >= 0))
+    active_nodes = active_nodes[active_nodes > 0]
+
+    cavity_rows = np.full(len(cavity_nodes), -1, dtype=np.int64)
+    cavity_row_lookup = {
+        int(node): int(row)
+        for row, (node, dof) in enumerate(labels)
+        if dof == 8
+    }
+    for i, node in enumerate(cavity_nodes):
+        cavity_rows[i] = cavity_row_lookup[int(node)]
+
+    return active_nodes, ux_row, uy_row, cavity_rows
+
+
+def _mode_signs(eigenvectors, mode_index):
+    signs = np.ones(len(eigenvectors), dtype=float)
+    if not eigenvectors:
+        return signs
+    previous = np.asarray(eigenvectors[0][:, mode_index])
+    for ti in range(1, len(eigenvectors)):
+        current = np.asarray(eigenvectors[ti][:, mode_index])
+        signs[ti] = signs[ti - 1]
+        if np.dot(previous * signs[ti - 1], current) < 0:
+            signs[ti] *= -1.0
+        previous = current
+    return signs
+
+
+def _strongest_mode_node_per_grid_cell(x, y, magnitude, grid_size):
+    """Select one high-amplitude arrow per occupied spatial grid cell."""
+    grid_size = max(2, int(grid_size))
+    x_span = max(float(np.ptp(x)), np.finfo(float).eps)
+    y_span = max(float(np.ptp(y)), np.finfo(float).eps)
+    ix = np.clip(((x - np.min(x)) / x_span * grid_size).astype(int), 0, grid_size - 1)
+    iy = np.clip(((y - np.min(y)) / y_span * grid_size).astype(int), 0, grid_size - 1)
+    cells = iy * grid_size + ix
+    strongest_first = np.argsort(magnitude)[::-1]
+    _, first = np.unique(cells[strongest_first], return_index=True)
+    return np.sort(strongest_first[first])
+
+
+def create_eigenmode_frame(data_E, data_C, hole_boundary_nodes, maps, T, ti, sign=1.0):
+    active_nodes, ux_row, uy_row, cavity_rows = maps
+    mode_index = int(T.mode_index)
+    vector = np.asarray(data_E['eigenvectors'][ti][:, mode_index]) * sign
+
+    ux = np.zeros(len(active_nodes), dtype=float)
+    uy = np.zeros(len(active_nodes), dtype=float)
+    rows_x = ux_row[active_nodes]
+    rows_y = uy_row[active_nodes]
+    has_x = rows_x >= 0
+    has_y = rows_y >= 0
+    ux[has_x] = vector[rows_x[has_x]]
+    uy[has_y] = vector[rows_y[has_y]]
+
+    node_keys = [str(int(node)) for node in active_nodes]
+    x = np.fromiter((data_C['COOR1'][key][ti] for key in node_keys), dtype=float)
+    y = np.fromiter((data_C['COOR2'][key][ti] for key in node_keys), dtype=float)
+    magnitude = np.hypot(ux, uy)
+    displacement_scale = np.percentile(magnitude[magnitude > 0], 99.5) if np.any(magnitude > 0) else 1.0
+    normalized_magnitude = np.clip(magnitude / displacement_scale, 0.0, 1.0)
+
+    cavity_x, cavity_y = [], []
+    for boundary in hole_boundary_nodes:
+        keys = [str(int(node_index) + 1) for node_index in boundary]
+        cavity_x.append(np.mean([data_C['COOR1'][key][ti] for key in keys]))
+        cavity_y.append(np.mean([data_C['COOR2'][key][ti] for key in keys]))
+    cavity_pressure = vector[cavity_rows]
+    pressure_scale = np.max(np.abs(cavity_pressure)) or 1.0
+    normalized_pressure = cavity_pressure / pressure_scale
+
+    if getattr(T, 'show_eigenvalue_history', True):
+        fig, (ax, ax_eig) = plt.subplots(
+            1, 2, figsize=T.figsize,
+            gridspec_kw={'width_ratios': [3.6, 1.25], 'wspace': 0.48},
+        )
+    else:
+        fig, ax = plt.subplots(figsize=T.figsize)
+        ax_eig = None
+
+    points = ax.scatter(
+        x, y, c=normalized_magnitude, s=T.node_size,
+        cmap=T.cmap_displacement, vmin=0.0, vmax=1.0,
+        linewidths=0, rasterized=True,
+    )
+
+    arrow_indices = _strongest_mode_node_per_grid_cell(
+        x, y, magnitude, getattr(T, 'quiver_grid', 18)
+    )
+    arrow_dx = np.clip(ux[arrow_indices] / displacement_scale, -1.0, 1.0) * T.arrow_length
+    arrow_dy = np.clip(uy[arrow_indices] / displacement_scale, -1.0, 1.0) * T.arrow_length
+    ax.quiver(
+        x[arrow_indices], y[arrow_indices], arrow_dx, arrow_dy,
+        angles='xy', scale_units='xy', scale=1, color='#16d9c5',
+        width=0.0022, headwidth=3.5, headlength=4.5, alpha=0.9,
+    )
+
+    cavities = ax.scatter(
+        cavity_x, cavity_y, c=normalized_pressure, s=T.cavity_size,
+        cmap=T.cmap_pressure, vmin=-1.0, vmax=1.0,
+        edgecolors='white', linewidths=0.45, zorder=5,
+    )
+    cax_u = ax.inset_axes([1.035, 0.56, 0.035, 0.38])
+    cax_p = ax.inset_axes([1.035, 0.06, 0.035, 0.38])
+    cbar_u = fig.colorbar(points, cax=cax_u)
+    cbar_u.set_label(r'Normalized modal displacement $|\phi_u|$')
+    cbar_p = fig.colorbar(cavities, cax=cax_p)
+    cbar_p.set_label(r'Normalized cavity-pressure component $\phi_p$')
+
+    eigenvalues = np.asarray(data_E['eigenvalues'], dtype=float)
+    eigenvalue = eigenvalues[ti, mode_index]
+    ax.set_title(
+        f'Tangent-stiffness mode {mode_index} at t = {data_E["t"][ti]:.3f}\n'
+        f'$\\lambda$ = {eigenvalue:.6e}'
+    )
+    ax.set_aspect('equal', adjustable='box')
+    if T.xlim is not None:
+        ax.set_xlim(T.xlim)
+    if T.ylim is not None:
+        ax.set_ylim(T.ylim)
+    ax.set_xlabel('x (mm)')
+    ax.set_ylabel('y (mm)')
+    ax.set_facecolor('#10151b')
+
+    if ax_eig is not None:
+        times = np.asarray(data_E['t'], dtype=float)
+        selected = eigenvalues[:, mode_index]
+        ax_eig.plot(times, selected, color='#e76f51', linewidth=1.8)
+        ax_eig.scatter(times[ti], selected[ti], color='#16d9c5', edgecolor='black', s=55, zorder=4)
+        ax_eig.axhline(0.0, color='black', linestyle='--', linewidth=1.0, alpha=0.65)
+        ax_eig.axvline(times[ti], color='#16d9c5', linewidth=1.0, alpha=0.65)
+        nonzero = np.abs(selected[np.nonzero(selected)])
+        if len(nonzero):
+            ax_eig.set_yscale('symlog', linthresh=max(np.percentile(nonzero, 5), 1e-12))
+        ax_eig.set_xlabel('Step-1 time')
+        ax_eig.set_ylabel(r'$\lambda$')
+        ax_eig.set_title(f'Eigenvalue branch {mode_index}')
+        ax_eig.grid(True, alpha=0.25)
+        ax_eig.text(
+            0.03, 0.03,
+            'Arrow sign is aligned in time.\nDisplacement and pressure are\nnormalized independently.',
+            transform=ax_eig.transAxes, va='bottom', fontsize=9,
+            bbox=dict(facecolor='white', alpha=0.8, edgecolor='0.8'),
+        )
+
+    fig.subplots_adjust(left=0.06, right=0.97, bottom=0.10, top=0.90)
+    fig.savefig(T.save_path, dpi=T.dpi, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f'Eigenmode frame saved to {T.save_path}')
+
+
+def create_eigenmode_multiple_frames(sim_num, T, save_path=None, frames_format='png'):
+    data_E = _load_pickle_with_redirect(f'I001_Results/DATA_PICK_{sim_num:03d}_EIGV.pkl')
+    data_C = _load_pickle_with_redirect(f'I001_Results/DATA_PICK_{sim_num:03d}_C.pkl')
+    if data_E is None or data_C is None:
+        raise FileNotFoundError(f'EIGV or C result file is missing for SIM_{sim_num:03d}')
+
+    total_frames = len(data_E['t'])
+    if len(data_C['t']) != total_frames or not np.allclose(data_C['t'], data_E['t'], atol=1e-6):
+        raise ValueError('Eigenvector and coordinate snapshots are not time-aligned')
+    mode_count = len(data_E['eigenvalues'][0])
+    if not 0 <= int(T.mode_index) < mode_count:
+        raise ValueError(f'mode_index must be between 0 and {mode_count - 1}')
+
+    mesh_path = _eigenmode_mesh_path(sim_num, T)
+    with open(mesh_path) as f:
+        mesh = json.load(f)
+    hole_boundary_nodes = mesh['hole_boundary_nodes']
+
+    coordinate_node_count = len(data_C['COOR1'])
+    maps = _eigenmode_row_maps(data_E['dof_labels'], coordinate_node_count)
+    signs = _mode_signs(data_E['eigenvectors'], int(T.mode_index)) if T.sign_align else np.ones(total_frames)
+
+    if T.num_frames is not None and T.num_frames < total_frames:
+        indices = np.linspace(0, total_frames - 1, T.num_frames, dtype=int)
+    else:
+        indices = range(total_frames)
+
+    os.makedirs(save_path, exist_ok=True)
+    for ti in indices:
+        T.save_path = os.path.join(save_path, f'frame_{ti:08d}.{frames_format}')
+        create_eigenmode_frame(data_E, data_C, hole_boundary_nodes, maps, T, ti, signs[ti])
+
+
 
 
 
@@ -2023,6 +2257,7 @@ def _create_single_frame_object(args):
         'Q1A': create_animation_Q1_multiple_frames,
         'TP1A': create_animation_TP1_multiple_frames,
         'PH':  create_pressure_histogram_multiple_frames,
+        'EV':  create_eigenmode_multiple_frames,
     }
 
     if frame_type not in frame_functions or obj is None:
@@ -2074,6 +2309,7 @@ def create_frames_for_sim(sim_num, T_C, max_parallel=1, frames_format='png'):
         'Q1A': create_animation_Q1_multiple_frames,
         'TP1A': create_animation_TP1_multiple_frames,
         'PH': create_pressure_histogram_multiple_frames,
+        'EV': create_eigenmode_multiple_frames,
     }
 
     tasks = []
