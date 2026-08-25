@@ -13,23 +13,29 @@ from A001_functions.Video_functions import (
 
 
 num_frames = 201
-MODE_INDEX = 0  # Stored modes are indexed 0 through 19.
-VIDEO_FOLDER = f'Video_3100_eigenmode_{MODE_INDEX:02d}'
+MODE_INDICES = range(5)  # Five smallest stored modes: 0 through 4.
+VIDEO_FOLDER = 'Video_3101_eigenmodes_00_04'
 
-EV3100 = frame_eigenmode()
-EV3100.mode_index = MODE_INDEX
-EV3100.num_frames = num_frames
-EV3100.figsize = (10.5, 9)
-EV3100.dpi = 120
-EV3100.xlim = (-2, 22)
-EV3100.ylim = (-2, 22)
-EV3100.node_size = 0.55
-EV3100.cavity_size = 90.0
-EV3100.quiver_grid = 18
-EV3100.arrow_length = 0.65
-EV3100.sign_align = True
-EV3100.show_eigenvalue_history = True
-EV3100.save_path = 'frames_eigenmode/'
+
+def _make_eigenmode(mode_index):
+    obj = frame_eigenmode()
+    obj.mode_index = mode_index
+    obj.num_frames = num_frames
+    obj.figsize = (10.5, 9)
+    obj.dpi = 120
+    obj.xlim = (-2, 22)
+    obj.ylim = (-2, 22)
+    obj.node_size = 0.55
+    obj.cavity_size = 90.0
+    obj.quiver_grid = 18
+    obj.arrow_length = 0.65
+    obj.sign_align = True
+    obj.show_eigenvalue_history = True
+    obj.save_path = f'frames_eigenmode_{mode_index:02d}/'
+    return obj
+
+
+EIGENMODES = [_make_eigenmode(mode) for mode in MODE_INDICES]
 
 
 # Reaction force versus imposed compression.
@@ -89,8 +95,8 @@ SHEAR_MEAN.save_path = 'frames_shear_mean/'
 
 
 T = frames_combination()
-T.canvas_size = (2800, 1700)
-T.title = f'SIM 3100: dynamic tangent-stiffness eigenmode {MODE_INDEX}'
+T.canvas_size = (3600, 2700)
+T.title = 'SIM 3101: five smallest dynamic tangent-stiffness eigenmodes'
 T.title_position = (45, 15)
 T.title_font = '/home/fruffini/.conda/envs/Fenv/lib/python3.11/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf'
 T.title_size = 38
@@ -107,20 +113,31 @@ T.max_parallel = 1
 T.frames_format = 'png'
 T.num_frames = num_frames
 T.vid_folder = VIDEO_FOLDER
+
+
+_eigen_positions = [
+    (40, 85), (1280, 85),
+    (40, 950), (1280, 950),
+    (40, 1815),
+]
 T.elements = [
     {
-        'position': (40, 85),
-        'size': (1780, 1500),
-        'path': 'frames_eigenmode/',
-        'subtitle': '',
+        'position': position,
+        'size': (1200, 800),
+        'path': obj.save_path,
+        'subtitle': f'Mode {mode}',
         'create_frames': True,
         'type': 'EV',
-        'object': EV3100,
-        'replace_frames': False,
-    },
+        'object': obj,
+        'replace_frames': True,
+    }
+    for mode, position, obj in zip(MODE_INDICES, _eigen_positions, EIGENMODES)
+]
+
+T.elements.extend([
     {
-        'position': (1900, 85),
-        'size': (820, 450),
+        'position': (2600, 85),
+        'size': (900, 650),
         'path': 'frames_reaction_force/',
         'subtitle': 'Reaction force',
         'create_frames': True,
@@ -129,8 +146,8 @@ T.elements = [
         'replace_frames': False,
     },
     {
-        'position': (1900, 625),
-        'size': (820, 450),
+        'position': (2600, 900),
+        'size': (900, 650),
         'path': 'frames_global_efficiency/',
         'subtitle': 'Average global efficiency',
         'create_frames': True,
@@ -139,8 +156,8 @@ T.elements = [
         'replace_frames': False,
     },
     {
-        'position': (1900, 1165),
-        'size': (820, 450),
+        'position': (2600, 1715),
+        'size': (900, 650),
         'path': 'frames_shear_mean/',
         'subtitle': 'Shear mean',
         'create_frames': True,
@@ -148,7 +165,7 @@ T.elements = [
         'object': SHEAR_MEAN,
         'replace_frames': False,
     },
-]
+])
 
 
 SCONF = SimulationConfig()
@@ -158,4 +175,4 @@ SCONF.frames_format = 'png'
 SCONF.frame_rate = 30
 SCONF.codec = 'mp4v'
 SCONF.frames_pattern = 'frames_final/frame_*.png'
-SCONF.video_output_name = f'video_eigenmode_{MODE_INDEX:02d}.mp4'
+SCONF.video_output_name = 'video_3101.mp4'

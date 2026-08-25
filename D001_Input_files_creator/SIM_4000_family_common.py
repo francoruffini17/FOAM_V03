@@ -24,6 +24,8 @@ class FamilySpec:
     mesh_file: str
     material_model: str
     description: str
+    output_frames: int = 200
+    output_interval: float = 0.005
 
 
 def _prepare_simulation_directory(path, replace):
@@ -78,9 +80,9 @@ def _build_object(sim_num, pressure, spec, sim_path):
         corner_xnyn_bc=[0, 0, None, None, None, None],
         corner_xpyn_bc=[None, 0, None, None, None, None],
         Pressure_BC=pressure,
-        time_interval_out=0.1,
+        time_interval_out=spec.output_interval,
         frequ_out=100,
-        out_frames=100,
+        out_frames=spec.output_frames,
         restart_line='',
         ELE_OUTPUT='S11, S12, S22',
         NODES_OUTPUT='COOR1, COOR2',
@@ -106,9 +108,9 @@ def _build_object(sim_num, pressure, spec, sim_path):
         corner_xnyn_bc=[0, 0, None, None, None, None],
         corner_xpyn_bc=[None, 0, None, None, None, None],
         BC_9999997=[None, U_RAMP, None, None, None, None],
-        time_interval_out=0.005,
+        time_interval_out=spec.output_interval,
         frequ_out=100,
-        out_frames=200,
+        out_frames=spec.output_frames,
         restart_line='',
         ELE_OUTPUT='S11, S12, S22',
         NODES_OUTPUT='COOR1, COOR2',
