@@ -7,10 +7,10 @@ from D001_Input_files_creator.SIM_4000_family_common import FamilySpec, create_f
 
 
 SPEC = FamilySpec(
-    first_sim=5100,
+    first_sim=6100,
     mesh_file='A1000.mesh.json',
     material_model='neo_hookean',
-    description='hexagonal packing, neo-Hookean, 401-output high resolution',
+    description='hexagonal packing, neo-Hookean, element eigenpairs',
     output_frames=400,
     output_interval=0.0025,
 )

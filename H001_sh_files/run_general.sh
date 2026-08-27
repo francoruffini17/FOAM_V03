@@ -85,6 +85,8 @@ Step flags (default: n):
                         (produces DATA_PICK_*_EIG.json for PKL E via a
                         standalone replay job - needs only the sim's .inp,
                         not the odb/csv; re-solves the loading path with cpus=N)
+  RUN_ELEMENT_EIGEN=y|n Run element-by-element tangent eigenpair extraction
+                        (produces DATA_PICK_*_EIGEL.json plus one NPZ per snapshot)
   RUN_REDUCE=y|n        Run Reduce_resultsV20
   RUN_VIDEO=y|n         Run Video_executorV20
 
@@ -154,7 +156,7 @@ else
     LIST_FILE="$1"; shift
 fi
 
-RUN_SIMULATIONS="n"; RUN_ABQ="n"; RUN_EIGEN="n"; RUN_REDUCE="n"; RUN_VIDEO="n"
+RUN_SIMULATIONS="n"; RUN_ABQ="n"; RUN_EIGEN="n"; RUN_ELEMENT_EIGEN="n"; RUN_REDUCE="n"; RUN_VIDEO="n"
 CONTINUE_ON_SOLVER_ERROR="n"
 PAR_SIMULATIONS=1; PAR_ABQ=1; PAR_EIGEN=1; PAR_RED=1; PAR_VID=1
 START_DELAY=120
@@ -188,6 +190,7 @@ for arg in "$@"; do
             RUN_SIMULATIONS) [[ "$value" == y || "$value" == n ]] && RUN_SIMULATIONS="$value" ;;
             RUN_ABQ)         [[ "$value" == y || "$value" == n ]] && RUN_ABQ="$value" ;;
             RUN_EIGEN)       [[ "$value" == y || "$value" == n ]] && RUN_EIGEN="$value" ;;
+            RUN_ELEMENT_EIGEN) [[ "$value" == y || "$value" == n ]] && RUN_ELEMENT_EIGEN="$value" ;;
             CONTINUE_ON_SOLVER_ERROR) [[ "$value" == y || "$value" == n ]] && CONTINUE_ON_SOLVER_ERROR="$value" ;;
             RUN_REDUCE)      [[ "$value" == y || "$value" == n ]] && RUN_REDUCE="$value" ;;
             RUN_VIDEO)       [[ "$value" == y || "$value" == n ]] && RUN_VIDEO="$value" ;;
@@ -207,12 +210,12 @@ for arg in "$@"; do
     fi
 done
 
-if [[ "$RUN_SIMULATIONS" == n && "$RUN_ABQ" == n && "$RUN_EIGEN" == n && "$RUN_REDUCE" == n && "$RUN_VIDEO" == n ]]; then
-    printf "Error: No steps enabled. Set at least one of RUN_SIMULATIONS/RUN_ABQ/RUN_EIGEN/RUN_REDUCE/RUN_VIDEO=y.\n" >&2
+if [[ "$RUN_SIMULATIONS" == n && "$RUN_ABQ" == n && "$RUN_EIGEN" == n && "$RUN_ELEMENT_EIGEN" == n && "$RUN_REDUCE" == n && "$RUN_VIDEO" == n ]]; then
+    printf "Error: No steps enabled. Set at least one pipeline step to y.\n" >&2
     exit 1
 fi
 
-if [[ "$RUN_SIMULATIONS" == y || "$RUN_ABQ" == y || "$RUN_EIGEN" == y ]]; then
+if [[ "$RUN_SIMULATIONS" == y || "$RUN_ABQ" == y || "$RUN_EIGEN" == y || "$RUN_ELEMENT_EIGEN" == y ]]; then
     resolve_abq_cmd || exit 1
     printf "Using Abaqus command: %s\n" "$ABQ_CMD"
 fi
@@ -289,6 +292,26 @@ run_eigen() {
         printf "Error: Eigenvalue extraction for %s failed. See logs/SIM_%s_eigen.log\n" "$sim" "$sim_number" >&2
     else
         printf "Eigen: %s completed.\n" "$sim"
+    fi
+    return "$status"
+}
+
+run_element_eigen() {
+    local sim="$1"
+    local sim_number; sim_number=$(printf "%s" "$sim" | grep -oE '[0-9]+$')
+    local sim_path="$SIMS_DIR/$sim"
+    [[ -d "$sim_path" ]] || { printf "Warning: %s not found. Skipping element eigenpairs.\n" "$sim_path" >&2; return 1; }
+    printf "Element eigen: Starting local tangent eigenpairs for %s ...\n" "$sim"
+
+    python -m A001_functions.stiffness_eigen "$sim_number" --element \
+        "$EIGEN_SEGMENTS" 1.0 "$CPUS" "$EIGEN_WORKERS" \
+        > "logs/SIM_${sim_number}_element_eigen.log" 2>&1
+    local status=$?
+
+    if [[ $status -ne 0 ]]; then
+        printf "Error: Element eigenpair extraction for %s failed. See logs/SIM_%s_element_eigen.log\n" "$sim" "$sim_number" >&2
+    else
+        printf "Element eigen: %s completed.\n" "$sim"
     fi
     return "$status"
 }
@@ -398,6 +421,11 @@ process_simulation() {
 
     if [[ "$RUN_EIGEN" == y ]]; then
         acquire_semaphore sem_eigen; run_eigen "$sim"; local s=$?; release_semaphore sem_eigen
+        [[ $s -ne 0 ]] && all_ok=1
+    fi
+
+    if [[ "$RUN_ELEMENT_EIGEN" == y ]]; then
+        acquire_semaphore sem_eigen; run_element_eigen "$sim"; local s=$?; release_semaphore sem_eigen
         [[ $s -ne 0 ]] && all_ok=1
     fi
 

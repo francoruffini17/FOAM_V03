@@ -66,6 +66,8 @@ duration from the existing *_EIGJOB.inp.
 Usage:
     python -m A001_functions.stiffness_eigen <SIM_NUMBER> [n_segments] [until] [cpus] [n_eigenvalues] [n_workers] [return_eigenvectors]
     python -m A001_functions.stiffness_eigen <SIM_NUMBER> --salvage [n_eigenvalues] [n_workers] [return_eigenvectors]
+    python -m A001_functions.stiffness_eigen <SIM_NUMBER> --element [n_segments] [until] [cpus] [n_workers]
+    python -m A001_functions.stiffness_eigen <SIM_NUMBER> --element --salvage [n_workers]
 
     n_segments    number of matrix-extraction points along Step-1 (default 100)
     until         fraction of Step-1 to replay, 0 < until <= 1 (default 1.0;
@@ -187,9 +189,12 @@ def _scaled_boundary_line(line, factor):
     return line
 
 
-def _matrix_step_lines(label, boundary_lines):
+def _matrix_step_lines(label, boundary_lines, element_by_element=False):
+    generate = '*Matrix Generate, stiffness'
+    if element_by_element:
+        generate += ', element by element'
     out = ['*Step, name=EIGMTX-{}, perturbation'.format(label),
-           '*Matrix Generate, stiffness',
+           generate,
            '*Matrix Output, stiffness, format=matrix input',
            '*Boundary']
     out.extend(_scaled_boundary_line(l, 0.0) for l in boundary_lines)
@@ -198,7 +203,7 @@ def _matrix_step_lines(label, boundary_lines):
 
 
 def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1',
-                     n_segments=100, until=1.0):
+                     n_segments=100, until=1.0, element_by_element=False):
     """Build the standalone replay input deck described in the module
     docstring. Returns the list of Step-1 step times at which a stiffness
     matrix is generated (first entry 0.0 = end of Step-0). Abaqus names the
@@ -255,7 +260,7 @@ def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1
     out.extend(step0_lines)
 
     schedule = [0.0]                # first matrix = state at end of Step-0
-    out.extend(_matrix_step_lines(0, boundary_lines))
+    out.extend(_matrix_step_lines(0, boundary_lines, element_by_element))
 
     for k in range(1, n_run + 1):
         name = 'EIGSEG-{}'.format(k)
@@ -268,7 +273,7 @@ def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1
         out.extend(_scaled_boundary_line(l, factor) for l in boundary_lines)
         out.append('*End Step')
 
-        out.extend(_matrix_step_lines(k, boundary_lines))
+        out.extend(_matrix_step_lines(k, boundary_lines, element_by_element))
         schedule.append(k * dt)
 
     with open(out_path, 'w') as f:
@@ -381,6 +386,92 @@ def parse_coordinate_mtx(path):
     return K, dof_labels
 
 
+def element_eigenpairs_from_mtx(path):
+    """Read an element-by-element Abaqus stiffness ``.mtx`` file.
+
+    MATRIX INPUT/LABELS element output has six columns: element label,
+    row node, row DOF, column node, column DOF, value.  The return value is
+    a compact collection of flat arrays that supports mixed CPS3/CPS4
+    meshes.  For element ``i`` its DOF labels and eigenvalues are sliced by
+    ``dof_offsets[i:i+2]``; its square eigenvector matrix (eigenvectors in
+    columns) is sliced by ``eigenvector_offsets[i:i+2]`` and reshaped to
+    ``(ndof, ndof)``.
+    """
+    try:
+        import pandas as pd
+        df = pd.read_csv(
+            path, header=None, sep=',', skipinitialspace=True,
+            dtype={0: np.int64, 1: np.int64, 2: np.int64,
+                   3: np.int64, 4: np.int64, 5: np.float64},
+        )
+    except Exception as exc:
+        raise ValueError('Could not read element matrix file {!r}: {}'.format(path, exc))
+    if df.shape[1] != 6:
+        raise ValueError(
+            'Element-by-element matrix {!r} must have 6 columns; got {}. '
+            'Was it generated with *Matrix Generate, ELEMENT BY ELEMENT?'.format(
+                path, df.shape[1]))
+
+    element_labels = []
+    dof_offsets = [0]
+    dof_nodes = []
+    dof_numbers = []
+    eigenvalue_blocks = []
+    eigenvector_offsets = [0]
+    eigenvector_blocks = []
+
+    for element_label, block in df.groupby(0, sort=True):
+        row_nodes = block[1].to_numpy(dtype=np.int64, copy=False)
+        row_dofs = block[2].to_numpy(dtype=np.int64, copy=False)
+        col_nodes = block[3].to_numpy(dtype=np.int64, copy=False)
+        col_dofs = block[4].to_numpy(dtype=np.int64, copy=False)
+        values = block[5].to_numpy(dtype=np.float64, copy=False)
+        if len(values) == 0:
+            continue
+        if row_dofs.max() >= _DOF_PACK or col_dofs.max() >= _DOF_PACK:
+            raise ValueError('DOF number >= {} in element {}'.format(
+                _DOF_PACK, int(element_label)))
+
+        row_keys = row_nodes * _DOF_PACK + row_dofs
+        col_keys = col_nodes * _DOF_PACK + col_dofs
+        unique_keys = np.unique(np.concatenate([row_keys, col_keys]))
+        key_to_index = {int(key): i for i, key in enumerate(unique_keys)}
+        n = len(unique_keys)
+        matrix = np.zeros((n, n), dtype=np.float64)
+        present = np.zeros((n, n), dtype=bool)
+
+        # Assignment rather than COO summation intentionally matches the
+        # global parser: if Abaqus repeats an entry, the final row wins.
+        for row_key, col_key, value in zip(row_keys, col_keys, values):
+            i = key_to_index[int(row_key)]
+            j = key_to_index[int(col_key)]
+            matrix[i, j] = value
+            present[i, j] = True
+        mirror_i, mirror_j = np.nonzero(present & ~present.T)
+        matrix[mirror_j, mirror_i] = matrix[mirror_i, mirror_j]
+
+        vals, vecs = np.linalg.eigh((matrix + matrix.T) * 0.5)
+        element_labels.append(int(element_label))
+        dof_nodes.extend((unique_keys // _DOF_PACK).astype(np.int64).tolist())
+        dof_numbers.extend((unique_keys % _DOF_PACK).astype(np.int16).tolist())
+        dof_offsets.append(dof_offsets[-1] + n)
+        eigenvalue_blocks.append(vals)
+        eigenvector_blocks.append(vecs.ravel(order='C'))
+        eigenvector_offsets.append(eigenvector_offsets[-1] + n * n)
+
+    return {
+        'element_labels': np.asarray(element_labels, dtype=np.int64),
+        'dof_offsets': np.asarray(dof_offsets, dtype=np.int64),
+        'dof_nodes': np.asarray(dof_nodes, dtype=np.int64),
+        'dof_numbers': np.asarray(dof_numbers, dtype=np.int16),
+        'eigenvalues': (np.concatenate(eigenvalue_blocks)
+                        if eigenvalue_blocks else np.empty(0, dtype=np.float64)),
+        'eigenvector_offsets': np.asarray(eigenvector_offsets, dtype=np.int64),
+        'eigenvectors': (np.concatenate(eigenvector_blocks)
+                         if eigenvector_blocks else np.empty(0, dtype=np.float64)),
+    }
+
+
 def smallest_eigenvalues(K, k=20, sigma=0.0, fallback_sigmas=(-1e-6, -1.0),
                          return_eigenvectors=False):
     """The k smallest eigenvalues (ascending) of the symmetric part of sparse
@@ -484,6 +575,79 @@ def _extract_eigenvalues(mtx_files, dt, n_eigenvalues=20, n_workers=None,
     return results, dof_labels
 
 
+def _element_eigen_worker(args):
+    """Diagonalize every local matrix in one snapshot and write its NPZ."""
+    mtx, dt, output_path = args
+    idx = _mtx_index(mtx)
+    time = _mtx_index_to_time(idx, dt)
+    if time is None:
+        raise ValueError('Unexpected element matrix step number {}'.format(idx))
+    payload = element_eigenpairs_from_mtx(mtx)
+    np.savez(output_path, matrix_index=np.int64(idx), time=np.float64(time),
+             **payload)
+    return {
+        'matrix_index': idx,
+        'time': time,
+        'n_elements': int(len(payload['element_labels'])),
+        'file': output_path,
+    }
+
+
+def _extract_element_eigenpairs(mtx_files, dt, sim_num, n_workers=None,
+                                delete_after=False, results_dir='I001_Results'):
+    """Extract all local eigenpairs, storing one NumPy archive per time.
+
+    Snapshot files keep the large dense eigenvector blocks out of the JSON
+    manifest and avoid constructing a multi-gigabyte pickle in memory.
+    """
+    if n_workers is None:
+        n_workers = min(4, os.cpu_count() or 1)
+    n_workers = max(1, min(int(n_workers), len(mtx_files) or 1))
+    output_dir = os.path.join(
+        results_dir, 'DATA_PICK_{:03d}_EIGEL'.format(sim_num))
+    os.makedirs(output_dir, exist_ok=True)
+
+    jobs = []
+    for mtx in mtx_files:
+        idx = _mtx_index(mtx)
+        output_path = os.path.join(output_dir, 'matrix_{:04d}.npz'.format(idx))
+        jobs.append((mtx, dt, output_path))
+
+    results = []
+
+    def collect(entry):
+        results.append(entry)
+        print('t = {:.4f}  {} element eigenproblems -> {}'.format(
+            entry['time'], entry['n_elements'], entry['file']), flush=True)
+        if delete_after:
+            os.remove(mtx_files_by_index[entry['matrix_index']])
+
+    mtx_files_by_index = {_mtx_index(path): path for path in mtx_files}
+    if n_workers == 1:
+        for job in jobs:
+            collect(_element_eigen_worker(job))
+    else:
+        with multiprocessing.Pool(n_workers) as pool:
+            for entry in pool.imap_unordered(_element_eigen_worker, jobs):
+                collect(entry)
+
+    results.sort(key=lambda entry: entry['time'])
+    manifest_path = os.path.join(
+        results_dir, 'DATA_PICK_{:03d}_EIGEL.json'.format(sim_num))
+    manifest = {
+        'format_version': 1,
+        'simulation': int(sim_num),
+        'description': 'Eigenpairs of each unassembled element tangent stiffness matrix',
+        'eigenvector_convention': 'columns; reshape each flat block to (ndof, ndof)',
+        'dof_order': 'Use dof_offsets to slice dof_nodes and dof_numbers',
+        'snapshots': results,
+    }
+    with open(manifest_path, 'w') as output:
+        json.dump(manifest, output, indent=2)
+    print('Wrote element-eigenpair manifest to {}'.format(manifest_path))
+    return manifest
+
+
 def _write_eig_vectors_pkl(sim_num, results, dof_labels):
     out_path = 'I001_Results/DATA_PICK_{:03d}_EIGV.pkl'.format(sim_num)
     os.makedirs('I001_Results', exist_ok=True)
@@ -574,6 +738,59 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
     return results
 
 
+def run_element(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
+                n_workers=None, results_dir='I001_Results'):
+    """Replay ``SIM_*`` and diagonalize every unassembled element tangent.
+
+    Unlike :func:`run`, this requests ``ELEMENT BY ELEMENT`` matrices and
+    retains every eigenvalue and eigenvector of every local matrix. Results
+    are written as one ``DATA_PICK_*_EIGEL/matrix_*.npz`` file per snapshot
+    plus a small ``DATA_PICK_*_EIGEL.json`` manifest.
+    """
+    job_name = 'SIM_{:03d}'.format(sim_num)
+    sim_dir = 'E001_Simulations/{}'.format(job_name)
+    inp_path = '{}/{}.inp'.format(sim_dir, job_name)
+    eig_job = '{}_EIGELJOB'.format(job_name)
+    eig_inp = '{}/{}.inp'.format(sim_dir, eig_job)
+    abq_cmd = os.environ.get('ABQ_CMD', 'abq')
+
+    schedule = build_replay_inp(
+        inp_path, eig_inp, n_segments=n_segments, until=until,
+        element_by_element=True)
+    dt = schedule[1] if len(schedule) > 1 else 0.0
+
+    for path in glob.glob('{}/{}*'.format(sim_dir, eig_job)):
+        if not path.endswith('.inp'):
+            _remove_path(path)
+
+    cmd = [abq_cmd, 'job=' + eig_job, 'input=' + eig_job + '.inp',
+           'cpus={}'.format(int(cpus)), 'interactive']
+    proc = subprocess.run(cmd, cwd=sim_dir)
+    if proc.returncode != 0:
+        print('WARNING: {} exited with status {} - parsing whatever element '
+              'matrices were written before the failure.'.format(
+                  eig_job, proc.returncode))
+
+    mtx_files = sorted(
+        glob.glob('{}/{}_STIF*.mtx'.format(sim_dir, eig_job)), key=_mtx_index)
+    if len(mtx_files) < len(schedule):
+        print('WARNING: only {} of {} element stiffness matrices were written - '
+              'the job probably stopped early.'.format(len(mtx_files), len(schedule)))
+    if not mtx_files:
+        raise RuntimeError('No element stiffness matrices were produced by {} - '
+                           'see {}/{}.dat'.format(eig_job, sim_dir, eig_job))
+
+    manifest = _extract_element_eigenpairs(
+        mtx_files, dt, sim_num, n_workers=n_workers,
+        delete_after=not keep_files, results_dir=results_dir)
+
+    if not keep_files:
+        for path in glob.glob('{}/{}*'.format(sim_dir, eig_job)):
+            if not path.endswith(('.inp', '.dat', '.sta')):
+                _remove_path(path)
+    return manifest
+
+
 def _segment_dt_from_replay_inp(eig_inp):
     """Read the segment duration back out of an existing replay .inp: the
     *Static data line of step EIGSEG-1 has the segment period as its second
@@ -626,6 +843,29 @@ def salvage(sim_num, n_eigenvalues=20, n_workers=None, keep_files=True,
     if return_eigenvectors:
         _write_eig_vectors_pkl(sim_num, results, dof_labels)
     return results
+
+
+def salvage_element(sim_num, n_workers=None, keep_files=True,
+                    results_dir='I001_Results'):
+    """Extract local eigenpairs from an interrupted element replay job."""
+    job_name = 'SIM_{:03d}'.format(sim_num)
+    sim_dir = 'E001_Simulations/{}'.format(job_name)
+    eig_job = '{}_EIGELJOB'.format(job_name)
+    eig_inp = '{}/{}.inp'.format(sim_dir, eig_job)
+    mtx_files = sorted(
+        glob.glob('{}/{}_STIF*.mtx'.format(sim_dir, eig_job)), key=_mtx_index)
+    if not mtx_files:
+        mtx_files = sorted(glob.glob(
+            '{}/EIGELBAK/{}_STIF*.mtx'.format(sim_dir, eig_job)), key=_mtx_index)
+    if not mtx_files:
+        raise RuntimeError('No {}_STIF*.mtx files found in {} (or EIGELBAK/)'.format(
+            eig_job, sim_dir))
+    dt = _segment_dt_from_replay_inp(eig_inp)
+    print('Salvaging {} element matrices from {} (segment dt = {:g})'.format(
+        len(mtx_files), sim_dir, dt))
+    return _extract_element_eigenpairs(
+        mtx_files, dt, sim_num, n_workers=n_workers,
+        delete_after=not keep_files, results_dir=results_dir)
 
 
 def create_PKL_E(sim_num: int, results_dir: str = "I001_Results", output_path: str = None,
@@ -710,10 +950,21 @@ def create_PKL_E(sim_num: int, results_dir: str = "I001_Results", output_path: s
 
 if __name__ == '__main__':
     import sys
-    args = [a for a in sys.argv[1:] if a != '--salvage']
+    do_element = '--element' in sys.argv[1:]
     do_salvage = '--salvage' in sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a not in ('--salvage', '--element')]
     sim = int(args[0])
-    if do_salvage:
+    if do_element and do_salvage:
+        workers = int(args[1]) if len(args) > 1 else None
+        salvage_element(sim, n_workers=workers)
+    elif do_element:
+        n_seg = int(args[1]) if len(args) > 1 else 100
+        until_frac = float(args[2]) if len(args) > 2 else 1.0
+        n_cpus = int(args[3]) if len(args) > 3 else 1
+        workers = int(args[4]) if len(args) > 4 else None
+        run_element(sim, n_segments=n_seg, until=until_frac,
+                    cpus=n_cpus, n_workers=workers)
+    elif do_salvage:
         n_eig = int(args[1]) if len(args) > 1 else 20
         workers = int(args[2]) if len(args) > 2 else None
         return_vectors = bool(int(args[3])) if len(args) > 3 else False
