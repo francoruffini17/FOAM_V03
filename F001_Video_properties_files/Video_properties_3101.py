@@ -23,8 +23,11 @@ def _make_eigenmode(mode_index):
     obj.num_frames = num_frames
     obj.figsize = (10.5, 9)
     obj.dpi = 120
-    obj.xlim = (-2, 22)
-    obj.ylim = (-2, 22)
+    # Resolve one padded limit from all frames so strongly deformed foams stay
+    # visible without making the camera move during the video.
+    obj.xlim = None
+    obj.ylim = None
+    obj.axis_padding = 1.0
     obj.node_size = 0.55
     obj.cavity_size = 90.0
     obj.quiver_grid = 18

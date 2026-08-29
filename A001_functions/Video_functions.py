@@ -1511,6 +1511,7 @@ class frame_eigenmode:
     cavity_size: float = 90.0
     quiver_grid: int = 18
     arrow_length: float = 0.65
+    axis_padding: float = 1.0
     sign_align: bool = True
     show_eigenvalue_history: bool = True
     mesh_file: str = None
@@ -1912,17 +1913,52 @@ def _eigenmode_row_maps(dof_labels, coordinate_node_count):
 
 
 def _mode_signs(eigenvectors, mode_index):
+    """Return signs that keep one stored eigenmode oriented continuously."""
     signs = np.ones(len(eigenvectors), dtype=float)
     if not eigenvectors:
         return signs
     previous = np.asarray(eigenvectors[0][:, mode_index])
     for ti in range(1, len(eigenvectors)):
         current = np.asarray(eigenvectors[ti][:, mode_index])
-        signs[ti] = signs[ti - 1]
-        if np.dot(previous * signs[ti - 1], current) < 0:
-            signs[ti] *= -1.0
+        overlap = float(np.vdot(previous, current).real)
+        signs[ti] = signs[ti - 1] * (-1.0 if overlap < 0.0 else 1.0)
         previous = current
     return signs
+
+
+def _eigenmode_plot_limits(data_C, active_nodes, T):
+    """Resolve fixed limits once from all coordinate snapshots.
+
+    Explicit limits on ``T`` still take precedence.  Automatic limits include
+    every plotted structural node at every time, which prevents clipping while
+    keeping the camera stationary throughout a video.
+    """
+    node_keys = [str(int(node)) for node in active_nodes]
+    padding = max(float(getattr(T, 'axis_padding', 1.0)), 0.0)
+
+    def coordinate_limit(component, explicit):
+        if explicit is not None:
+            return tuple(explicit)
+
+        lower = np.inf
+        upper = -np.inf
+        for key in node_keys:
+            values = np.asarray(data_C[component][key], dtype=float)
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                lower = min(lower, float(np.min(finite)))
+                upper = max(upper, float(np.max(finite)))
+        if not np.isfinite(lower) or not np.isfinite(upper):
+            raise ValueError(f'No finite {component} values were found for the eigenmode plot')
+        if lower == upper:
+            lower -= 0.5
+            upper += 0.5
+        return lower - padding, upper + padding
+
+    return (
+        coordinate_limit('COOR1', getattr(T, 'xlim', None)),
+        coordinate_limit('COOR2', getattr(T, 'ylim', None)),
+    )
 
 
 def _strongest_mode_node_per_grid_cell(x, y, magnitude, grid_size):
@@ -1938,7 +1974,9 @@ def _strongest_mode_node_per_grid_cell(x, y, magnitude, grid_size):
     return np.sort(strongest_first[first])
 
 
-def create_eigenmode_frame(data_E, data_C, hole_boundary_nodes, maps, T, ti, sign=1.0):
+def create_eigenmode_frame(
+        data_E, data_C, hole_boundary_nodes, maps, T, ti, sign=1.0,
+        plot_limits=None):
     active_nodes, ux_row, uy_row, cavity_rows = maps
     mode_index = int(T.mode_index)
     vector = np.asarray(data_E['eigenvectors'][ti][:, mode_index]) * sign
@@ -2013,13 +2051,14 @@ def create_eigenmode_frame(data_E, data_C, hole_boundary_nodes, maps, T, ti, sig
         f'$\\lambda$ = {eigenvalue:.6e}'
     )
     ax.set_aspect('equal', adjustable='box')
-    if T.xlim is not None:
-        ax.set_xlim(T.xlim)
-    if T.ylim is not None:
-        ax.set_ylim(T.ylim)
+    xlim, ylim = plot_limits or (T.xlim, T.ylim)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
     ax.set_xlabel('x (mm)')
     ax.set_ylabel('y (mm)')
-    ax.set_facecolor('#10151b')
+    ax.set_facecolor('white')
 
     if ax_eig is not None:
         times = np.asarray(data_E['t'], dtype=float)
@@ -2069,6 +2108,7 @@ def create_eigenmode_multiple_frames(sim_num, T, save_path=None, frames_format='
     coordinate_node_count = len(data_C['COOR1'])
     maps = _eigenmode_row_maps(data_E['dof_labels'], coordinate_node_count)
     signs = _mode_signs(data_E['eigenvectors'], int(T.mode_index)) if T.sign_align else np.ones(total_frames)
+    plot_limits = _eigenmode_plot_limits(data_C, maps[0], T)
 
     if T.num_frames is not None and T.num_frames < total_frames:
         indices = np.linspace(0, total_frames - 1, T.num_frames, dtype=int)
@@ -2078,7 +2118,10 @@ def create_eigenmode_multiple_frames(sim_num, T, save_path=None, frames_format='
     os.makedirs(save_path, exist_ok=True)
     for ti in indices:
         T.save_path = os.path.join(save_path, f'frame_{ti:08d}.{frames_format}')
-        create_eigenmode_frame(data_E, data_C, hole_boundary_nodes, maps, T, ti, signs[ti])
+        create_eigenmode_frame(
+            data_E, data_C, hole_boundary_nodes, maps, T, ti, signs[ti],
+            plot_limits=plot_limits,
+        )
 
 
 
