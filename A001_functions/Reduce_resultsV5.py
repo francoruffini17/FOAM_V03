@@ -16,6 +16,7 @@ from A001_functions.Hex_5 import (read_graph_mesh, map_undeformed_to_deformed,
 from A001_functions.fem_stress_interpolation import interpolate_stress
 from A001_functions.compute_DEFC import create_PKL_DEFC1, create_PKL_DEFC2
 from A001_functions.stiffness_eigen import create_PKL_E
+from A001_functions.pkl_forward import PickleForwarder
 from scipy.spatial import cKDTree
 from scipy.linalg import fractional_matrix_power
 from numba import jit
@@ -3767,7 +3768,32 @@ def process_simulation(args):
     """Processes a single simulation based on input arguments."""
 
     try:
+        forward_pkl = args[47] if len(args) > 47 else 'n'
+        args = args[:47]
         i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, in_DEFC1, in_DEFC2, in_E, delete_csv, n_workers, max_memory_gb = args
+
+        stage_flags = {
+            'A': in_A, 'A2': in_A2, 'B': in_B, 'C': in_C, 'C2': in_C2,
+            'D': in_D, 'T1': in_T1, 'T2': in_T2,
+            'J1': in_J1, 'J2': in_J2, 'J3': in_J3,
+            'H1': in_H1, 'H2': in_H2, 'H3': in_H3,
+            'I1': in_I1, 'I2': in_I2, 'I3': in_I3,
+            'K1': in_K1, 'K2': in_K2, 'K3': in_K3,
+            'Q1': in_Q1, 'Q2': in_Q2, 'TP1': in_TP1, 'TP2': in_TP2,
+            'DEFC1': in_DEFC1, 'DEFC2': in_DEFC2, 'E': in_E,
+        }
+        enabled = {name for name, value in stage_flags.items() if value in ('y', 'Y')}
+        dependencies = {
+            'A': {'A2', 'DEFC1'}, 'B': {'D', 'J1', 'H1', 'I1', 'K1'},
+            'C': {'C2', 'DEFC1'},
+            'C2': {'D', 'T1', 'J1', 'H1', 'I1', 'K1', 'Q1', 'TP1'},
+            'T1': {'T2'}, 'J1': {'J2'}, 'J2': {'J3'},
+            'H1': {'H2'}, 'H2': {'H3'}, 'I1': {'I2'}, 'I2': {'I3'},
+            'K1': {'K2'}, 'K2': {'K3'}, 'Q1': {'Q2'},
+            'TP1': {'TP2', 'DEFC1'}, 'DEFC1': {'DEFC2'}, 'EIGV': {'E'},
+        }
+        forwarder = (PickleForwarder(enabled, i, dependencies)
+                     if forward_pkl in ('y', 'Y') else PickleForwarder.disabled())
         
         csv_file = f'I001_Results/RES_SIM_{i:03}.csv'
 
@@ -3787,6 +3813,7 @@ def process_simulation(args):
             with open(pickle_file, 'wb') as f:
                 pickle.dump(data_varA, f)
             del data_varA
+            forwarder.complete('A')
 
 
 
@@ -3818,6 +3845,7 @@ def process_simulation(args):
             with open(pickle_file, 'wb') as f:
                 pickle.dump(data_varB, f)
             del data_varB
+            forwarder.complete('B')
 
 
         if in_C in ('y', 'Y'):
@@ -3833,6 +3861,7 @@ def process_simulation(args):
             with open(pickle_file, 'wb') as f:
                 pickle.dump(data_varC, f)
             del data_varC
+            forwarder.complete('C')
 
 
         if in_C2 in ('y', 'Y'):
@@ -3845,6 +3874,7 @@ def process_simulation(args):
                 pickle.dump(data_varC2, f)
 
             del data_varC2
+            forwarder.complete('C2')
 
 
         if in_D in ('y', 'Y'):
@@ -3859,6 +3889,7 @@ def process_simulation(args):
                 pickle.dump(data_varD, f)
 
             del data_varD
+            forwarder.complete('D')
 
 
         if in_A2 in ('y', 'Y'):
@@ -3871,6 +3902,7 @@ def process_simulation(args):
                 pickle.dump(data_varA2, f)
 
             del data_varA2
+            forwarder.complete('A2')
 
 
         if in_T1 in ('y', 'Y'):
@@ -3924,6 +3956,8 @@ def process_simulation(args):
                     del data_T1, data_T2
                 except Exception as e:
                     print(f"Error processing T2 for simulation {i:03d}, T1={ext_T1s:03d}: {e}")
+
+        forwarder.complete(*(stage for stage in ('T1', 'T2') if stage in enabled))
 
 
         if in_J1 in ('y', 'Y'):
@@ -4005,6 +4039,8 @@ def process_simulation(args):
 
                 except Exception as e:
                     print(f"Error processing J3 for simulation {i:03d}, J={ext_Js:03d}: {e}")
+
+        forwarder.complete(*(stage for stage in ('J1', 'J2', 'J3') if stage in enabled))
 
 
 
@@ -4091,6 +4127,8 @@ def process_simulation(args):
                 except Exception as e:
                     print(f"Error processing H3 for simulation {i:03d}, H={ext_Hs:03d}: {e}")
 
+        forwarder.complete(*(stage for stage in ('H1', 'H2', 'H3') if stage in enabled))
+
 
 
 
@@ -4174,6 +4212,8 @@ def process_simulation(args):
 
                 except Exception as e:
                     print(f"Error processing I3 for simulation {i:03d}, I={ext_Is:03d}: {e}")
+
+        forwarder.complete(*(stage for stage in ('I1', 'I2', 'I3') if stage in enabled))
 
 
 
@@ -4259,6 +4299,8 @@ def process_simulation(args):
                 except Exception as e:
                     print(f"Error processing K3 for simulation {i:03d}, K={ext_Ks:03d}: {e}")
 
+        forwarder.complete(*(stage for stage in ('K1', 'K2', 'K3') if stage in enabled))
+
 
 
 
@@ -4315,6 +4357,8 @@ def process_simulation(args):
                 except Exception as e:
                     print(f"Error processing Q2 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
 
+        forwarder.complete(*(stage for stage in ('Q1', 'Q2') if stage in enabled))
+
 
         if in_TP1 in ('y', 'Y'):
             data_varC2 = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_C2.pkl', f"TP1 for simulation {i:03d}")
@@ -4354,6 +4398,8 @@ def process_simulation(args):
                 except Exception as e:
                     print(f"Error processing TP2 for simulation {i:03d}: {e}")
 
+        forwarder.complete(*(stage for stage in ('TP1', 'TP2') if stage in enabled))
+
         if in_DEFC1 in ('y', 'Y'):
             try:
                 data_DEFC1 = create_PKL_DEFC1(sim_num=i)
@@ -4378,11 +4424,14 @@ def process_simulation(args):
                 except Exception as e:
                     print(f"Error processing DEFC2 for simulation {i:03d}: {e}")
 
+        forwarder.complete(*(stage for stage in ('DEFC1', 'DEFC2') if stage in enabled))
+
         if in_E in ('y', 'Y'):
             try:
                 create_PKL_E(sim_num=i)
             except Exception as e:
                 print(f"Error processing E for simulation {i:03d}: {e}")
+            forwarder.complete('E')
 
         if delete_csv in ('y','Y'):
             if os.path.exists(csv_file):

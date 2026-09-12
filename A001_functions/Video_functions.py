@@ -230,8 +230,11 @@ def create_graph_property_frame(pkl_G2,T):
 
 
 def create_graph_property_multiple_frames(sim_num, T, save_path=None, frames_format='png'):
-    with open(f'I001_Results/DATA_PICK_{sim_num:03d}_{T.file_ext}.pkl', "rb") as f:
-        Gs = pickle.load(f)
+    Gs = _load_pickle_with_redirect(
+        f'I001_Results/DATA_PICK_{sim_num:03d}_{T.file_ext}.pkl')
+    if Gs is None:
+        raise FileNotFoundError(
+            f'DATA_PICK_{sim_num:03d}_{T.file_ext}.pkl is missing locally and in AAA_fwd')
 
     os.makedirs(save_path, exist_ok=True)
 
@@ -1682,12 +1685,18 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
 
 
 def create_variable_multiple_frames(sim_num, T , save_path = None, frames_format='png'):
-    with open(f'I001_Results/DATA_PICK_{sim_num:03d}_{T.file_key_x}.pkl', "rb") as f:
-        pkl_x_obj = pickle.load(f)
+    pkl_x_obj = _load_pickle_with_redirect(
+        f'I001_Results/DATA_PICK_{sim_num:03d}_{T.file_key_x}.pkl')
+    if pkl_x_obj is None:
+        raise FileNotFoundError(
+            f'DATA_PICK_{sim_num:03d}_{T.file_key_x}.pkl is missing locally and in AAA_fwd')
 
     if T.file_key_y != T.file_key_x:
-        with open(f'I001_Results/DATA_PICK_{sim_num:03d}_{T.file_key_y}.pkl', "rb") as f:
-            pkl_y_obj = pickle.load(f)
+        pkl_y_obj = _load_pickle_with_redirect(
+            f'I001_Results/DATA_PICK_{sim_num:03d}_{T.file_key_y}.pkl')
+        if pkl_y_obj is None:
+            raise FileNotFoundError(
+                f'DATA_PICK_{sim_num:03d}_{T.file_key_y}.pkl is missing locally and in AAA_fwd')
     else:
         pkl_y_obj = pkl_x_obj
 

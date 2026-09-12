@@ -8,6 +8,7 @@ import multiprocessing
 import sys
 
 from .Reduce_resultsV5 import process_simulation
+from .pkl_forward import PickleForwarder
 
 
 def _yn(s):
@@ -80,8 +81,13 @@ def main():
                    help='Parallel workers for G2_exact; 0=auto (default: 0)')
     p.add_argument('--max-memory-gb', type=float, default=0.0, metavar='GB',
                    help='RAM budget for G2_exact in GB; 0=auto (default: 0)')
+    yn('forward-pkl', 'n',
+       'Move completed PKLs to the absolute destination in I001_Results/AAA_fwd')
 
     args = p.parse_args()
+
+    if args.forward_pkl == 'y':
+        PickleForwarder(set(), args.sim_start, {})
 
     J_alg = None if args.J_alg == '1' else 'bfs'
     H_alg = None if args.H_alg == '1' else 'bfs'
@@ -103,6 +109,7 @@ def main():
             args.delete_csv,
             args.n_workers or None,      # 0 → None (auto)
             args.max_memory_gb or None,  # 0.0 → None (auto)
+            args.forward_pkl,
         )
         for i in range(args.sim_start, args.sim_end + 1)
     ]
