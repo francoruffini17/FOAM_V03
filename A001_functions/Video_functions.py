@@ -41,8 +41,10 @@ def _localization_index_from_shear_min(sim_num):
     directly against any of them without interpolation.
     """
     path = f'I001_Results/DATA_PICK_{sim_num:03d}_TP2_L.pkl'
-    with open(path, "rb") as f:
-        tp2l = pickle.load(f)
+    tp2l = _load_pickle_with_redirect(path)
+    if tp2l is None:
+        raise FileNotFoundError(
+            f'DATA_PICK_{sim_num:03d}_TP2_L.pkl is missing locally and in AAA_fwd')
     return int(np.argmin(np.array(tp2l['shear_mean'])))
 
 
@@ -248,6 +250,8 @@ def create_graph_property_multiple_frames(sim_num, T, save_path=None, frames_for
 
     for i in indices:
         save_path_ = os.path.join(save_path, f'frame_{i:08d}.{frames_format}')
+        if getattr(T, 'resume_frames', False) and os.path.exists(save_path_):
+            continue
         T_c = copy.deepcopy(T)
         T_c.save_path = save_path_
         T_c.t_x = i
@@ -880,6 +884,8 @@ def create_animation_graph_multiple_frames(sim_num, T, save_path=None, frames_fo
 
     for ti in indices:
         T.save_path = save_path + f'frame_{ti:08d}.{frames_format}'
+        if getattr(T, 'resume_frames', False) and os.path.exists(T.save_path):
+            continue
         T.t_x = ti
         
         create_animation_graph_frame(
@@ -1720,11 +1726,10 @@ def create_variable_multiple_frames(sim_num, T , save_path = None, frames_format
         create_variable_frame(pkl_x_obj, T, pkl_y_obj=pkl_y_obj)
 
 
-def _load_pickle_with_redirect(path):
-    """Load a pickle from the local results tree or from I001_Results/AAA_fwd."""
+def _results_path_with_redirect(path):
+    """Return a local result path, following I001_Results/AAA_fwd when needed."""
     if os.path.exists(path):
-        with open(path, 'rb') as f:
-            return pickle.load(f)
+        return path
 
     results_dir = 'I001_Results'
     fwd_file = os.path.join(results_dir, 'AAA_fwd')
@@ -1733,8 +1738,16 @@ def _load_pickle_with_redirect(path):
             fwd_dir = f.read().strip()
         fwd_path = os.path.join(fwd_dir, os.path.relpath(path, results_dir))
         if os.path.exists(fwd_path):
-            with open(fwd_path, 'rb') as f:
-                return pickle.load(f)
+            return fwd_path
+    return None
+
+
+def _load_pickle_with_redirect(path):
+    """Load a pickle from the local results tree or from I001_Results/AAA_fwd."""
+    resolved_path = _results_path_with_redirect(path)
+    if resolved_path is not None:
+        with open(resolved_path, 'rb') as f:
+            return pickle.load(f)
     return None
 
 
@@ -1881,7 +1894,11 @@ def create_pressure_histogram_multiple_frames(sim_num, T, save_path=None, frames
 def _eigenmode_mesh_path(sim_num, T):
     if getattr(T, 'mesh_file', None):
         return T.mesh_file
-    obj_path = f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json'
+    obj_path = _results_path_with_redirect(
+        f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json')
+    if obj_path is None:
+        raise FileNotFoundError(
+            f'OBJ_files/SIM_{sim_num:03d}.json is missing locally and in AAA_fwd')
     with open(obj_path) as f:
         return json.load(f)['input_name']
 
@@ -2127,6 +2144,8 @@ def create_eigenmode_multiple_frames(sim_num, T, save_path=None, frames_format='
     os.makedirs(save_path, exist_ok=True)
     for ti in indices:
         T.save_path = os.path.join(save_path, f'frame_{ti:08d}.{frames_format}')
+        if getattr(T, 'resume_frames', False) and os.path.exists(T.save_path):
+            continue
         create_eigenmode_frame(
             data_E, data_C, hole_boundary_nodes, maps, T, ti, signs[ti],
             plot_limits=plot_limits,
@@ -2416,10 +2435,20 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
     contains_evaluation = "{" in title_gen and "}" in title_gen if title_gen else False
     
     # if contains_evaluation:
-    with open(f'I001_Results/DATA_PICK_{sim_num:03d}_A2.pkl', "rb") as f:
+    data_path = _results_path_with_redirect(
+        f'I001_Results/DATA_PICK_{sim_num:03d}_A2.pkl')
+    if data_path is None:
+        raise FileNotFoundError(
+            f'DATA_PICK_{sim_num:03d}_A2.pkl is missing locally and in AAA_fwd')
+    with open(data_path, "rb") as f:
         DATA = pickle.load(f)
 
-    with open(f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json', 'r') as file:
+    obj_path = _results_path_with_redirect(
+        f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json')
+    if obj_path is None:
+        raise FileNotFoundError(
+            f'OBJ_files/SIM_{sim_num:03d}.json is missing locally and in AAA_fwd')
+    with open(obj_path, 'r') as file:
         DATA_J = json.load(file)
 
     # --- load porosity from mesh JSON ---
@@ -2447,7 +2476,10 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
             T.ti = ti
             
             T.save_path = 'I002_Videos/' + T.vid_folder + f'/SIM_{sim_num:03d}/' + original_save_path + f'frame_{ti:08d}.{frames_format}'
-        
+
+            if getattr(T, 'resume_final_frames', False) and os.path.exists(T.save_path):
+                continue
+            
             os.makedirs(os.path.dirname(T.save_path), exist_ok=True)    
         
             #update path
@@ -2538,7 +2570,9 @@ def create_vid_from_frames(frame_pattern=None, output_path=None, frame_rate=50, 
     ]
     if scale_width is not None:
         ffmpeg_cmd += ["-vf", f"scale={scale_width}:-2"]
-    ffmpeg_cmd += ["-vcodec", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", output_path]
+    # Cap encoder concurrency on the shared render host and use a fast preset
+    # so high-resolution diagnostic videos finish atomically.
+    ffmpeg_cmd += ["-r", str(frame_rate), "-vcodec", "libx264", "-threads", "4", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", output_path]
 
     try:
         subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
