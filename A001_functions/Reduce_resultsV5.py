@@ -20,6 +20,7 @@ from A001_functions.pkl_forward import PickleForwarder
 from scipy.spatial import cKDTree
 from scipy.linalg import fractional_matrix_power
 from numba import jit
+from .reduction_io import tracked_open as open
 
 
 def _mesh_prefix_from_input_name(input_name: str) -> str:
@@ -66,13 +67,15 @@ def _mesh_prefix_for_sim(sim_num: int) -> str:
 
 
 def _load_pickle_or_skip(path: str, context: str):
-    """Load a pickle dependency, returning None when this item should be skipped."""
+    """Load a required dependency; fail the simulation if it is unavailable."""
     try:
         with open(path, "rb") as f:
-            return pickle.load(f)
+            data = pickle.load(f)
+        if data is None:
+            raise ValueError('Dependency contains None instead of result data')
+        return data
     except Exception as e:
-        print(f"Skipping {context}; could not load '{path}': {e}")
-        return None
+        raise RuntimeError(f"Cannot reduce {context}; could not load '{path}': {e}") from e
 
 
 def merge_data(data, dataa2):
@@ -589,7 +592,7 @@ def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=No
 
     # ---- Determine worker count ----------------------------------------
     if n_workers is None:
-        n_workers = min(multiprocessing.cpu_count(), total_steps)
+        n_workers = 1
 
     if max_memory_gb is not None and total_steps > 0:
         # Estimate peak memory per worker from largest graph
@@ -603,7 +606,6 @@ def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=No
             n_workers = min(n_workers, max(1, int(max_memory_gb / mem_per_worker_gb)))
 
     n_workers = max(1, n_workers)
-    print(f"create_PKL_G2_exact: {total_steps} timesteps, {n_workers} workers, algorithm={algorithm}")
 
     # ---- Build task list -----------------------------------------------
     # n_nodes_total: total overlay-graph node count (including isolated
@@ -625,6 +627,8 @@ def create_PKL_G2_exact(DATA_G, n_workers=None, max_memory_gb=None, algorithm=No
     # Cannot spawn child processes from a daemon process (e.g. inside Pool workers)
     if multiprocessing.current_process().daemon:
         n_workers = 1
+
+    print(f"create_PKL_G2_exact: {total_steps} timesteps, {n_workers} workers, algorithm={algorithm}", flush=True)
 
     if n_workers == 1:
         for task in tasks:
@@ -2170,7 +2174,8 @@ def create_PKL_TP1(DATA_C2: dict, sim_num: int, output_path: str = None) -> dict
 # ---------------------------------------------------------------------------
 
 def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
-                   w_param_sets: list = None, step1_start_ti: int = 0) -> dict:
+                   w_param_sets: list = None, step1_start_ti: int = 0,
+                   _batch_internal=False) -> dict:
     """
     Compute statistical summary of element data from a PKL_TP1 dictionary.
 
@@ -2198,6 +2203,10 @@ def create_PKL_TP2(DATA_TP1: dict, output_path: str = None, sim_num: int = None,
         'q' = 4*sqrt(3)*A/(l1^2+l2^2+l3^2) for tri,
               4*A/(l1^2+l2^2+l3^2+l4^2) for quad.
     """
+    if not _batch_internal:
+        from .tp2_streaming import reduce_tp2
+        return reduce_tp2(DATA_TP1, create_PKL_TP2, output_path, sim_num,
+                          w_param_sets, step1_start_ti)
     t        = DATA_TP1['t']
     n_t      = len(t)
     elem_ids = sorted(DATA_TP1['elements'].keys())
@@ -3765,7 +3774,7 @@ def _order_sub_bar_chain(
 
 
 def process_simulation(args):
-    """Processes a single simulation based on input arguments."""
+    """Reduce one simulation, raising on failure before deleting its CSV."""
 
     try:
         forward_pkl = args[47] if len(args) > 47 else 'n'
@@ -3817,20 +3826,6 @@ def process_simulation(args):
 
 
 
-
-        if in_A2 in ('y', 'Y'):
-            data_varA = _load_pickle_or_skip(f'I001_Results/DATA_PICK_{i:03}_A.pkl', f"A2 for simulation {i:03d}")
-            if data_varA is None:
-                return
-            data_varA2 = dataA2_generator(data_varA)
-            pickle_file = f'I001_Results/DATA_PICK_{i:03}_A2.pkl'
-
-            with open(pickle_file, 'wb') as f:
-                pickle.dump(data_varA2, f)
-
-            del data_varA2
-            
-    
 
         if in_B in ('y', 'Y'):
 
@@ -3932,10 +3927,12 @@ def process_simulation(args):
                             del data_T2
                         except Exception as e:
                             print(f"Error processing T2 for simulation {i:03d}, T1={ext_T1s:03d}: {e}")
+                            raise
 
                     del data_T1
                 except Exception as e:
                     print(f"Error processing T1 for simulation {i:03d}, T1={ext_T1s:03d}: {e}")
+                    raise
 
             del data_varC2
 
@@ -3956,6 +3953,7 @@ def process_simulation(args):
                     del data_T1, data_T2
                 except Exception as e:
                     print(f"Error processing T2 for simulation {i:03d}, T1={ext_T1s:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('T1', 'T2') if stage in enabled))
 
@@ -3996,6 +3994,7 @@ def process_simulation(args):
                         del data_J1
                     except Exception as e:
                         print(f"Error processing J1 for simulation {i:03d}, J={ext_Js:03d}: {e}")
+                        raise
 
                 del data_varB, data_varC2
 
@@ -4017,6 +4016,7 @@ def process_simulation(args):
                     del data_J1, data_J2
                 except Exception as e:
                     print(f"Error processing J2 for simulation {i:03d}, J={ext_Js:03d}: {e}")
+                    raise
 
 
         if in_J3 in ('y', 'Y'):
@@ -4039,6 +4039,7 @@ def process_simulation(args):
 
                 except Exception as e:
                     print(f"Error processing J3 for simulation {i:03d}, J={ext_Js:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('J1', 'J2', 'J3') if stage in enabled))
 
@@ -4083,6 +4084,7 @@ def process_simulation(args):
 
                     except Exception as e:
                         print(f"Error processing H1 for simulation {i:03d}, H={ext_Hs:03d}: {e}")
+                        raise
 
                 del data_varB, data_varC2
 
@@ -4104,6 +4106,7 @@ def process_simulation(args):
                     del data_H1, data_H2
                 except Exception as e:
                     print(f"Error processing H2 for simulation {i:03d}, H={ext_Hs:03d}: {e}")
+                    raise
 
 
         if in_H3 in ('y', 'Y'):
@@ -4126,6 +4129,7 @@ def process_simulation(args):
 
                 except Exception as e:
                     print(f"Error processing H3 for simulation {i:03d}, H={ext_Hs:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('H1', 'H2', 'H3') if stage in enabled))
 
@@ -4169,6 +4173,7 @@ def process_simulation(args):
 
                     except Exception as e:
                         print(f"Error processing I1 for simulation {i:03d}, I={ext_Is:03d}: {e}")
+                        raise
 
                 del data_varB, data_varC2
 
@@ -4190,6 +4195,7 @@ def process_simulation(args):
                     del data_I1, data_I2
                 except Exception as e:
                     print(f"Error processing I2 for simulation {i:03d}, I={ext_Is:03d}: {e}")
+                    raise
 
 
         if in_I3 in ('y', 'Y'):
@@ -4212,6 +4218,7 @@ def process_simulation(args):
 
                 except Exception as e:
                     print(f"Error processing I3 for simulation {i:03d}, I={ext_Is:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('I1', 'I2', 'I3') if stage in enabled))
 
@@ -4255,6 +4262,7 @@ def process_simulation(args):
 
                     except Exception as e:
                         print(f"Error processing K1 for simulation {i:03d}, K={ext_Ks:03d}: {e}")
+                        raise
 
                 del data_varB, data_varC2
 
@@ -4276,6 +4284,7 @@ def process_simulation(args):
                     del data_K1, data_K2
                 except Exception as e:
                     print(f"Error processing K2 for simulation {i:03d}, K={ext_Ks:03d}: {e}")
+                    raise
 
 
         if in_K3 in ('y', 'Y'):
@@ -4298,6 +4307,7 @@ def process_simulation(args):
 
                 except Exception as e:
                     print(f"Error processing K3 for simulation {i:03d}, K={ext_Ks:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('K1', 'K2', 'K3') if stage in enabled))
 
@@ -4332,10 +4342,12 @@ def process_simulation(args):
                                 del data_Q2
                             except Exception as e:
                                 print(f"Error processing Q2 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
+                                raise
 
                         del data_Q1
                     except Exception as e:
                         print(f"Error processing Q1 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
+                        raise
 
                 del data_varC2
 
@@ -4356,6 +4368,7 @@ def process_simulation(args):
                     del data_Q1, data_Q2
                 except Exception as e:
                     print(f"Error processing Q2 for simulation {i:03d}, Q={ext_Qs:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('Q1', 'Q2') if stage in enabled))
 
@@ -4377,10 +4390,12 @@ def process_simulation(args):
                             )
                         except Exception as e:
                             print(f"Error processing TP2 for simulation {i:03d}: {e}")
+                            raise
 
                     del data_TP1
                 except Exception as e:
                     print(f"Error processing TP1 for simulation {i:03d}: {e}")
+                    raise
 
                 del data_varC2
 
@@ -4397,6 +4412,7 @@ def process_simulation(args):
                     del data_TP1
                 except Exception as e:
                     print(f"Error processing TP2 for simulation {i:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('TP1', 'TP2') if stage in enabled))
 
@@ -4409,10 +4425,12 @@ def process_simulation(args):
                         create_PKL_DEFC2(data_DEFC1, sim_num=i)
                     except Exception as e:
                         print(f"Error processing DEFC2 for simulation {i:03d}: {e}")
+                        raise
 
                 del data_DEFC1
             except Exception as e:
                 print(f"Error processing DEFC1 for simulation {i:03d}: {e}")
+                raise
 
         elif in_DEFC2 in ('y', 'Y'):
             defc1_path = f'I001_Results/DATA_PICK_{i:03}_DEFC1.pkl'
@@ -4423,6 +4441,7 @@ def process_simulation(args):
                     del data_DEFC1
                 except Exception as e:
                     print(f"Error processing DEFC2 for simulation {i:03d}: {e}")
+                    raise
 
         forwarder.complete(*(stage for stage in ('DEFC1', 'DEFC2') if stage in enabled))
 
@@ -4431,6 +4450,7 @@ def process_simulation(args):
                 create_PKL_E(sim_num=i)
             except Exception as e:
                 print(f"Error processing E for simulation {i:03d}: {e}")
+                raise
             forwarder.complete('E')
 
         if delete_csv in ('y','Y'):
@@ -4441,6 +4461,7 @@ def process_simulation(args):
                 print(f"{csv_file} not found.")
     except Exception as e:
         print(f"An error occurred while processing simulation {i:03d}: {e}")
+        raise
 
 
 if __name__ == "__main__":
@@ -4516,6 +4537,5 @@ if __name__ == "__main__":
     # Prepare arguments for multiprocessing
     args_list = [(i, in_A, in_A2, in_B, in_C, in_C2, in_D, in_T1, in_T2, T1_ini, T1_fin, in_J1, in_J2, in_J3, J_ini, J_fin, J_alg, in_H1, in_H2, in_H3, H_ini, H_fin, H_alg, in_I1, in_I2, in_I3, I_ini, I_fin, I_alg, in_K1, in_K2, in_K3, K_ini, K_fin, K_alg, in_Q1, in_Q2, Q_ini, Q_fin, in_TP1, in_TP2, in_DEFC1, in_DEFC2, in_E, delete_csv, n_workers, max_memory_gb) for i in range(A, B + 1)]
 
-    # Use multiprocessing to process simulations in parallel
-    with multiprocessing.Pool() as pool:
-        pool.map(process_simulation, args_list)
+    from A001_functions.reduction_runner import run_reductions
+    raise SystemExit(run_reductions(args_list))

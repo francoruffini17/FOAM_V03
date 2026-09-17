@@ -72,8 +72,10 @@ class graph_property:
     figsize: list[float] = None  # Figure size
     file_ext: str = 'G2'  # File name (not used directly in plotting)
     xscale: str = 'linear'  # X-axis scale
+    x_data_scale: float = 1.0  # Multiplier applied to the stored x coordinate before plotting.
     yscale: str = 'linear'  # Y-axis scale
     include_allnodes: bool = False  # For 'G_eff': also plot the all-nodes-normalised efficiency (global_ef_*_allnodes keys)
+    preserve_aspect_ratio: bool = False  # Save at the native figsize, without tight-cropping.
 
 
 def create_graph_property_frame(pkl_G2,T):
@@ -83,6 +85,8 @@ def create_graph_property_frame(pkl_G2,T):
     else:
         plt.figure(figsize=(5,4))
     
+    x = np.asarray(pkl_G2['t'], dtype=float) * getattr(T, 'x_data_scale', 1.0)
+
     if T.tension_compression in ['both', 'tension']:
         if T.ppty == 'Density':
             sg_t = pkl_G2['density_t']
@@ -99,7 +103,7 @@ def create_graph_property_frame(pkl_G2,T):
             sg_t = pkl_G2['global_ef_t']
 
         if T.dotted == True:
-            x = np.array(pkl_G2['t'][1:])
+            x_plot = x[1:]
             y = np.array(sg_t[1:])
             
             # Create solid and dotted arrays filled with NaNs
@@ -113,17 +117,17 @@ def create_graph_property_frame(pkl_G2,T):
                 else:
                     y_solid[i] = y[i]
 
-            plt.plot(x,y_solid,'-r',label = 'Tension graph')
-            plt.plot(x,y_dotted,':r',label ='Unit Tension graph')
+            plt.plot(x_plot,y_solid,'-r',label = 'Tension graph')
+            plt.plot(x_plot,y_dotted,':r',label ='Unit Tension graph')
         else:
-            plt.plot(pkl_G2['t'][1:],sg_t[1:],'r',label = 'Tension graph')
+            plt.plot(x[1:],sg_t[1:],'r',label = 'Tension graph')
 
         if T.t_x is not None:
             if T.t_x >0:
-                plt.plot(pkl_G2['t'][T.t_x],sg_t[T.t_x],'kx')
+                plt.plot(x[T.t_x],sg_t[T.t_x],'kx')
 
         if T.mark_index is not None and T.mark_index > 0:
-            plt.plot(pkl_G2['t'][T.mark_index], sg_t[T.mark_index], marker='D',
+            plt.plot(x[T.mark_index], sg_t[T.mark_index], marker='D',
                       color='lime', markeredgecolor='k', markersize=9, zorder=6,
                       linestyle='None', label='Localization point')
 
@@ -131,10 +135,10 @@ def create_graph_property_frame(pkl_G2,T):
         # created before 'n_nodes_total' existed - curve simply not drawn)
         if T.ppty == 'G_eff' and T.include_allnodes and 'global_ef_t_allnodes' in pkl_G2:
             sg_t_all = np.array(pkl_G2['global_ef_t_allnodes'], dtype=float)
-            plt.plot(pkl_G2['t'][1:], sg_t_all[1:], '--', color='darkred',
+            plt.plot(x[1:], sg_t_all[1:], '--', color='darkred',
                      label='Tension graph (all nodes)')
             if T.t_x is not None and T.t_x > 0:
-                plt.plot(pkl_G2['t'][T.t_x], sg_t_all[T.t_x], 'kx')
+                plt.plot(x[T.t_x], sg_t_all[T.t_x], 'kx')
 
 
     if T.tension_compression in ['both', 'compression']:
@@ -154,26 +158,26 @@ def create_graph_property_frame(pkl_G2,T):
         elif T.ppty == 'G_eff':
             sg_c = pkl_G2['global_ef_c']
 
-        plt.plot(pkl_G2['t'][1:],sg_c[1:],'b',label = 'Compression graph')
+        plt.plot(x[1:],sg_c[1:],'b',label = 'Compression graph')
 
 
         if T.t_x is not None:
             if T.t_x > 0:
-                plt.plot(pkl_G2['t'][T.t_x],sg_c[T.t_x],'kx')
+                plt.plot(x[T.t_x],sg_c[T.t_x],'kx')
 
         if T.mark_index is not None and T.mark_index > 0:
             label = 'Localization point' if T.tension_compression == 'compression' else None
-            plt.plot(pkl_G2['t'][T.mark_index], sg_c[T.mark_index], marker='D',
+            plt.plot(x[T.mark_index], sg_c[T.mark_index], marker='D',
                       color='lime', markeredgecolor='k', markersize=9, zorder=6,
                       linestyle='None', label=label)
 
         # All-nodes-normalised efficiency overlay (see tension branch note)
         if T.ppty == 'G_eff' and T.include_allnodes and 'global_ef_c_allnodes' in pkl_G2:
             sg_c_all = np.array(pkl_G2['global_ef_c_allnodes'], dtype=float)
-            plt.plot(pkl_G2['t'][1:], sg_c_all[1:], '--', color='darkblue',
+            plt.plot(x[1:], sg_c_all[1:], '--', color='darkblue',
                      label='Compression graph (all nodes)')
             if T.t_x is not None and T.t_x > 0:
-                plt.plot(pkl_G2['t'][T.t_x], sg_c_all[T.t_x], 'kx')
+                plt.plot(x[T.t_x], sg_c_all[T.t_x], 'kx')
 
 
     if T.tension_compression in ['comb']:
@@ -182,14 +186,14 @@ def create_graph_property_frame(pkl_G2,T):
             sg_c = np.array(pkl_G2['global_ef_c'])
             sg_t = np.array(pkl_G2['global_ef_t'])
 
-        plt.plot(pkl_G2['t'][1:],sg_t[1:]/sg_c[1:],'g',label = 'Tension/Compression graph')
+        plt.plot(x[1:],sg_t[1:]/sg_c[1:],'g',label = 'Tension/Compression graph')
 
         if T.t_x is not None:
             if T.t_x > 0:
-                plt.plot(pkl_G2['t'][T.t_x],sg_t[T.t_x]/sg_c[T.t_x],'kx')
+                plt.plot(x[T.t_x],sg_t[T.t_x]/sg_c[T.t_x],'kx')
 
         if T.mark_index is not None and T.mark_index > 0:
-            plt.plot(pkl_G2['t'][T.mark_index], sg_t[T.mark_index]/sg_c[T.mark_index],
+            plt.plot(x[T.mark_index], sg_t[T.mark_index]/sg_c[T.mark_index],
                       marker='D', color='lime', markeredgecolor='k', markersize=9,
                       zorder=6, linestyle='None', label='Localization point')
 
@@ -221,7 +225,10 @@ def create_graph_property_frame(pkl_G2,T):
     plt.yscale(T.yscale)
     
     if T.save_path is not None:
-        plt.savefig(T.save_path, dpi=T.dpi, bbox_inches = 'tight')
+        plt.savefig(
+            T.save_path, dpi=T.dpi,
+            bbox_inches=None if getattr(T, 'preserve_aspect_ratio', False) else 'tight',
+        )
         print(f"Frame saved to {T.save_path}")
         
     if T.show_fig is True:
@@ -1480,6 +1487,7 @@ class frame_variable:
     ratio_key_pairs: list = None
     mark_localization: bool = False  # If True, mark the localization point (frame index of min shear_mean, from TP2_L) on every frame
     localization_index: int = None  # Frame index of the localization point; computed automatically per-sim when mark_localization is True
+    preserve_aspect_ratio: bool = False  # Save at the native figsize, without tight-cropping.
 
 
 @dataclass
@@ -1520,6 +1528,9 @@ class frame_eigenmode:
     cavity_size: float = 90.0
     quiver_grid: int = 18
     arrow_length: float = 0.65
+    arrow_color: str = '#202020'
+    arrow_width: float = 0.0048
+    x_data_scale: float = 1.0  # Maps stored step progress to the displayed strain.
     axis_padding: float = 1.0
     sign_align: bool = True
     show_eigenvalue_history: bool = True
@@ -1683,7 +1694,10 @@ def create_variable_frame(pkl_A2_obj, T, pkl_y_obj=None):
 
     # Save or display the plot
     if save_path:
-        plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+        plt.savefig(
+            save_path, dpi=dpi,
+            bbox_inches=None if getattr(T, 'preserve_aspect_ratio', False) else 'tight',
+        )
         print(f"Plot saved to {save_path}")
         plt.close()
     else:
@@ -2054,8 +2068,10 @@ def create_eigenmode_frame(
     arrow_dy = np.clip(uy[arrow_indices] / displacement_scale, -1.0, 1.0) * T.arrow_length
     ax.quiver(
         x[arrow_indices], y[arrow_indices], arrow_dx, arrow_dy,
-        angles='xy', scale_units='xy', scale=1, color='#16d9c5',
-        width=0.0022, headwidth=3.5, headlength=4.5, alpha=0.9,
+        angles='xy', scale_units='xy', scale=1,
+        color=getattr(T, 'arrow_color', '#202020'),
+        width=getattr(T, 'arrow_width', 0.0048),
+        headwidth=4.2, headlength=5.2, alpha=0.95, zorder=4,
     )
 
     cavities = ax.scatter(
@@ -2071,9 +2087,10 @@ def create_eigenmode_frame(
     cbar_p.set_label(r'Normalized cavity-pressure component $\phi_p$')
 
     eigenvalues = np.asarray(data_E['eigenvalues'], dtype=float)
+    displayed_strain = data_E['t'][ti] * getattr(T, 'x_data_scale', 1.0)
     eigenvalue = eigenvalues[ti, mode_index]
     ax.set_title(
-        f'Tangent-stiffness mode {mode_index} at t = {data_E["t"][ti]:.3f}\n'
+        f'Tangent-stiffness mode {mode_index} at strain = {displayed_strain:.3f}\n'
         f'$\\lambda$ = {eigenvalue:.6e}'
     )
     ax.set_aspect('equal', adjustable='box')
@@ -2084,10 +2101,16 @@ def create_eigenmode_frame(
         ax.set_ylim(ylim)
     ax.set_xlabel('x (mm)')
     ax.set_ylabel('y (mm)')
+    # Keep only the coordinate rulers; the full rectangular axes box is noisy
+    # against the foam rendering.
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
     ax.set_facecolor('white')
 
     if ax_eig is not None:
-        times = np.asarray(data_E['t'], dtype=float)
+        times = np.asarray(data_E['t'], dtype=float) * getattr(T, 'x_data_scale', 1.0)
         selected = eigenvalues[:, mode_index]
         ax_eig.plot(times, selected, color='#e76f51', linewidth=1.8)
         ax_eig.scatter(times[ti], selected[ti], color='#16d9c5', edgecolor='black', s=55, zorder=4)
@@ -2096,7 +2119,7 @@ def create_eigenmode_frame(
         nonzero = np.abs(selected[np.nonzero(selected)])
         if len(nonzero):
             ax_eig.set_yscale('symlog', linthresh=max(np.percentile(nonzero, 5), 1e-12))
-        ax_eig.set_xlabel('Step-1 time')
+        ax_eig.set_xlabel('Strain')
         ax_eig.set_ylabel(r'$\lambda$')
         ax_eig.set_title(f'Eigenvalue branch {mode_index}')
         ax_eig.grid(True, alpha=0.25)
@@ -2179,6 +2202,7 @@ class frames_combination:
     canvas_size = (800, 600)
     canvas_color = "white"
     title_position = (0, 0)
+    title_align: str = 'left'
     size = (300, 300)
     elements: List[dict] = None
     delete_after_concat: bool = False
@@ -2239,6 +2263,7 @@ def flexible_image_compositor_updated(T):
     title_size = T.title_size
     title_color = T.title_color
     dpi = T.dpi
+    title_align = getattr(T, 'title_align', 'left')
 
     try:
         # Load title font
@@ -2248,8 +2273,14 @@ def flexible_image_compositor_updated(T):
         canvas = Image.new("RGB", canvas_size, T.canvas_color)
         draw = ImageDraw.Draw(canvas)
 
-        # Draw title
-        draw.text(title_position, title, fill=title_color, font=font)
+        # Draw title.  Center alignment uses the canvas centre while retaining
+        # title_position[1] as the requested vertical offset.
+        if title_align == 'center':
+            title_bbox = draw.textbbox((0, 0), title, font=font)
+            title_x = (canvas_size[0] - (title_bbox[2] - title_bbox[0])) // 2
+            draw.text((title_x, title_position[1]), title, fill=title_color, font=font)
+        else:
+            draw.text(title_position, title, fill=title_color, font=font)
 
         # Draw each image element
         for el in elements:
@@ -2451,13 +2482,36 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
     with open(obj_path, 'r') as file:
         DATA_J = json.load(file)
 
-    # --- load porosity from mesh JSON ---
+    # --- load mesh metadata used by configurable frame titles ---
     _mesh_file = DATA_J.get('input_name', '')
     porosity = None
+    mesh_kind = None
     if _mesh_file.endswith('.mesh.json') and os.path.exists(_mesh_file):
         with open(_mesh_file, 'r') as _f:
             _mesh_info = json.load(_f)
-        porosity = _mesh_info.get('geometry', {}).get('porosity')
+        _geometry = _mesh_info.get('geometry', {})
+        porosity = _geometry.get('porosity')
+        mesh_kind = _geometry.get('mesh_kind')
+
+    foam_shape_labels = {
+        'hexagonal_packing': 'Hexagonal packed foam',
+        'square_packing': 'Square packed foam',
+        'rhombic_packing': 'Rhombic packed foam',
+        'random': 'Random foam',
+    }
+    foam_shape = foam_shape_labels.get(
+        mesh_kind, str(mesh_kind).replace('_', ' ').title() if mesh_kind else 'Unknown foam shape')
+    material_model = str(DATA_J.get('material_model', 'linear')).lower()
+    material_model_display = {
+        'linear': 'Linear elastic',
+        'neo_hookean': 'Neo-Hookean',
+    }.get(material_model, material_model.replace('_', ' ').title())
+    _steps = DATA_J.get('steps', [])
+    internal_pressure = next(
+        (step.get('Pressure_BC') for step in _steps if step.get('Pressure_BC') is not None),
+        next((step.get('INT_P') for step in _steps if step.get('INT_P') is not None),
+             DATA_J.get('initial_Pressure')),
+    )
 
 
     original_save_path = T.save_path 
@@ -2503,6 +2557,9 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
                         "DATA_J": DATA_J, 
                         "ti": ti,
                         "porosity": porosity,
+                        "foam_shape": foam_shape,
+                        "material_model_display": material_model_display,
+                        "internal_pressure": internal_pressure,
                         # "from_name": from_name,
                         # "from_r_to_p": from_r_to_p
                     })

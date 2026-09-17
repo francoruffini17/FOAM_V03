@@ -4,10 +4,9 @@ Flag-based interface to Reduce_resultsV5.process_simulation. No stdin required.
 """
 
 import argparse
-import multiprocessing
 import sys
 
-from .Reduce_resultsV5 import process_simulation
+from .reduction_runner import run_reductions
 from .pkl_forward import PickleForwarder
 
 
@@ -78,13 +77,23 @@ def main():
     p.add_argument('--delete-csv', default='n', type=_yn, metavar='y|n',
                    help='Delete CSV after reduction (default: n)')
     p.add_argument('--n-workers', type=int, default=0, metavar='N',
-                   help='Parallel workers for G2_exact; 0=auto (default: 0)')
+                   help='Parallel workers for G2_exact; 0=conservative single worker (default: 0)')
     p.add_argument('--max-memory-gb', type=float, default=0.0, metavar='GB',
                    help='RAM budget for G2_exact in GB; 0=auto (default: 0)')
     yn('forward-pkl', 'n',
        'Move completed PKLs to the absolute destination in I001_Results/AAA_fwd')
+    yn('resume', 'y', 'Reuse verified stage checkpoints')
+    yn('TP2-summary-only', 'n', 'Write only TP2_L using bounded element batches')
+    p.add_argument('--TP2-batch-size', type=int, default=64,
+                   help='Elements per TP2 batch (default: 64)')
+    p.add_argument('--simulation-timeout', type=float, default=0, metavar='SECONDS',
+                   help='Stop a simulation after this wall time; 0=disabled')
 
     args = p.parse_args()
+    if args.TP2_batch_size < 1 or args.n_workers < 0 or args.max_memory_gb < 0:
+        p.error('Batch size must be positive; worker count and memory must be nonnegative')
+    if args.sim_end < args.sim_start or args.simulation_timeout < 0:
+        p.error('Require sim_end >= sim_start and simulation-timeout >= 0')
 
     if args.forward_pkl == 'y':
         PickleForwarder(set(), args.sim_start, {})
@@ -110,13 +119,13 @@ def main():
             args.n_workers or None,      # 0 → None (auto)
             args.max_memory_gb or None,  # 0.0 → None (auto)
             args.forward_pkl,
+            args.TP2_batch_size, args.TP2_summary_only,
         )
         for i in range(args.sim_start, args.sim_end + 1)
     ]
 
-    with multiprocessing.Pool() as pool:
-        pool.map(process_simulation, args_list)
+    return run_reductions(args_list, timeout=args.simulation_timeout, resume=args.resume == 'y')
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

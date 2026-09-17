@@ -174,7 +174,8 @@ declare -A OUTPUT_OPTIONS=(
     [Q1]="n"   [Q2]="n"   [Q_ini]="0" [Q_fin]="0"
     [TP1]="n"  [TP2]="n"  [DEFC1]="n" [DEFC2]="n"
     [E]="n"
-    [DELETE_CSV]="n" [N_WORKERS]="0" [MAX_MEMORY_GB]="0"
+    [DELETE_CSV]="n" [N_WORKERS]="1" [MAX_MEMORY_GB]="0"
+    [RESUME]="y" [TP2_BATCH_SIZE]="64" [TP2_SUMMARY_ONLY]="n"
 )
 
 for arg in "$@"; do
@@ -347,6 +348,9 @@ run_reduce() {
         --delete-csv "${OUTPUT_OPTIONS[DELETE_CSV]}" \
         --n-workers "${OUTPUT_OPTIONS[N_WORKERS]}" \
         --max-memory-gb "${OUTPUT_OPTIONS[MAX_MEMORY_GB]}" \
+        --resume "${OUTPUT_OPTIONS[RESUME]}" \
+        --TP2-batch-size "${OUTPUT_OPTIONS[TP2_BATCH_SIZE]}" \
+        --TP2-summary-only "${OUTPUT_OPTIONS[TP2_SUMMARY_ONLY]}" \
         > "logs/SIM_${sim_number}_reduce.log" 2>&1
     local status=$?
 
