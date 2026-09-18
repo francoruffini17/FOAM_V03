@@ -2234,7 +2234,7 @@ def create_placeholder_image(size, color_name):
     color = color_map.get(color_name.lower(), (255, 255, 255))
     return Image.new("RGB", size, color)
 
-def safe_load_image(path, size):
+def safe_load_image(path, size, preserve_aspect_ratio=False):
     if path.lower() in ["white", "gray", "black"]:
         # Use default size if size is None
         return create_placeholder_image(size if size else (100, 100), path)
@@ -2243,7 +2243,22 @@ def safe_load_image(path, size):
     try:
         img = Image.open(path).convert("RGB")
         if size is not None:
-            resized = img.resize(size)
+            if preserve_aspect_ratio:
+                source_ratio = img.width / img.height
+                target_ratio = size[0] / size[1]
+                if source_ratio >= target_ratio:
+                    fitted_size = (size[0], max(1, round(size[0] / source_ratio)))
+                else:
+                    fitted_size = (max(1, round(size[1] * source_ratio)), size[1])
+                fitted = img.resize(fitted_size, Image.Resampling.LANCZOS)
+                resized = Image.new('RGB', size, 'white')
+                resized.paste(
+                    fitted,
+                    ((size[0] - fitted.width) // 2, (size[1] - fitted.height) // 2),
+                )
+                fitted.close()
+            else:
+                resized = img.resize(size)
             img.close()
             return resized
         else:
@@ -2291,9 +2306,10 @@ def flexible_image_compositor_updated(T):
             subtitle_font_path = el.get("subtitle_font", title_font)
             subtitle_font_size = el.get("subtitle_size", T.subtitle_size)
             subtitle_offset = el.get("subtitle_offset", 5)
+            preserve_aspect_ratio = el.get("preserve_aspect_ratio", False)
 
             subtitle_font = ImageFont.truetype(subtitle_font_path, subtitle_font_size) if subtitle_font_path else ImageFont.load_default()
-            img = safe_load_image(path, size)
+            img = safe_load_image(path, size, preserve_aspect_ratio=preserve_aspect_ratio)
             # If size is None, use the image's original size for pasting
             if size is None:
                 canvas.paste(img, pos)
