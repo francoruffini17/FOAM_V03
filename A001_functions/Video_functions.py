@@ -1756,12 +1756,90 @@ def _results_path_with_redirect(path):
     return None
 
 
+def _load_simulation_json(sim_num):
+    """Load legacy OBJ metadata, falling back to the self-contained lite copy."""
+    obj_path = _results_path_with_redirect(
+        f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json')
+    if obj_path is not None:
+        with open(obj_path) as stream:
+            return json.load(stream)
+    lite_path = f'I001_Results/LITE/SIM_{sim_num:03d}/metadata.json'
+    if os.path.exists(lite_path):
+        with open(lite_path) as stream:
+            return json.load(stream)['simulation_parameters']
+    return None
+
+
 def _load_pickle_with_redirect(path):
     """Load a pickle from the local results tree or from I001_Results/AAA_fwd."""
     resolved_path = _results_path_with_redirect(path)
     if resolved_path is not None:
         with open(resolved_path, 'rb') as f:
             return pickle.load(f)
+    return _load_lite_result_for_legacy_path(path)
+
+
+def _load_lite_result_for_legacy_path(path):
+    """Adapt Video_3200 lite NPZ files to the established plotting schema."""
+    import re
+    match = re.search(r'DATA_PICK_(\d+)_(.+)\.pkl$', os.path.basename(path))
+    if match is None:
+        return None
+    sim_num = int(match.group(1))
+    key = match.group(2)
+    lite_dir = os.path.join('I001_Results', 'LITE', f'SIM_{sim_num:03d}')
+
+    if key in ('A2', 'TP2_L') or key.startswith('I3'):
+        curves_path = os.path.join(lite_dir, 'curves.npz')
+        if not os.path.exists(curves_path):
+            return None
+        with np.load(curves_path, allow_pickle=False) as data:
+            if key == 'A2':
+                return {
+                    't': data['t'].copy(),
+                    'U2': {'PERN-9999997': data['u2'].copy()},
+                    'RF2': {'PERN-9999997': data['rf2'].copy()},
+                }
+            if key == 'TP2_L':
+                return {'t': data['t'].copy(), 'shear_mean': data['shear_mean'].copy()}
+            return {
+                't': data['t'].copy(),
+                'global_ef_t': data['global_ef_t'].copy(),
+                'global_ef_c': data['global_ef_c'].copy(),
+                'global_ef_t_allnodes': data['global_ef_t_allnodes'].copy(),
+                'global_ef_c_allnodes': data['global_ef_c_allnodes'].copy(),
+                'n_nodes_total': int(data['n_nodes_total']),
+            }
+
+    if key == 'C':
+        geometry_path = os.path.join(lite_dir, 'geometry.npz')
+        if not os.path.exists(geometry_path):
+            return None
+        with np.load(geometry_path, allow_pickle=False) as data:
+            coordinates = data['coordinates']
+            node_ids = data['node_ids']
+            return {
+                't': data['t'].copy(),
+                'COOR1': {str(int(node)): coordinates[:, i, 0].copy()
+                          for i, node in enumerate(node_ids)},
+                'COOR2': {str(int(node)): coordinates[:, i, 1].copy()
+                          for i, node in enumerate(node_ids)},
+            }
+
+    if key == 'EIGV':
+        mode_path = os.path.join(lite_dir, 'mode0.npz')
+        if not os.path.exists(mode_path):
+            return None
+        with np.load(mode_path, allow_pickle=False) as data:
+            vectors = data['eigenvector']
+            return {
+                'source_file': mode_path,
+                'dof_labels': data['dof_labels'].copy(),
+                't': data['t'].copy(),
+                'matrix_index': data['matrix_index'].copy(),
+                'eigenvalues': data['eigenvalue'][:, None].copy(),
+                'eigenvectors': [vectors[i, :, None].copy() for i in range(len(vectors))],
+            }
     return None
 
 
@@ -1908,13 +1986,11 @@ def create_pressure_histogram_multiple_frames(sim_num, T, save_path=None, frames
 def _eigenmode_mesh_path(sim_num, T):
     if getattr(T, 'mesh_file', None):
         return T.mesh_file
-    obj_path = _results_path_with_redirect(
-        f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json')
-    if obj_path is None:
+    metadata = _load_simulation_json(sim_num)
+    if metadata is None:
         raise FileNotFoundError(
             f'OBJ_files/SIM_{sim_num:03d}.json is missing locally and in AAA_fwd')
-    with open(obj_path) as f:
-        return json.load(f)['input_name']
+    return metadata['input_name']
 
 
 def _eigenmode_row_maps(dof_labels, coordinate_node_count):
@@ -2150,9 +2226,19 @@ def create_eigenmode_multiple_frames(sim_num, T, save_path=None, frames_format='
         raise ValueError(f'mode_index must be between 0 and {mode_count - 1}')
 
     mesh_path = _eigenmode_mesh_path(sim_num, T)
-    with open(mesh_path) as f:
-        mesh = json.load(f)
-    hole_boundary_nodes = mesh['hole_boundary_nodes']
+    if os.path.exists(mesh_path):
+        with open(mesh_path) as f:
+            mesh = json.load(f)
+        hole_boundary_nodes = mesh['hole_boundary_nodes']
+    else:
+        geometry_path = f'I001_Results/LITE/SIM_{sim_num:03d}/geometry.npz'
+        if not os.path.exists(geometry_path):
+            raise FileNotFoundError(mesh_path)
+        with np.load(geometry_path, allow_pickle=False) as geometry:
+            padded = geometry['hole_boundary_nodes']
+            lengths = geometry['hole_boundary_lengths']
+            hole_boundary_nodes = [padded[i, :int(length)].tolist()
+                                   for i, length in enumerate(lengths)]
 
     coordinate_node_count = len(data_C['COOR1'])
     maps = _eigenmode_row_maps(data_E['dof_labels'], coordinate_node_count)
@@ -2482,21 +2568,16 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
     contains_evaluation = "{" in title_gen and "}" in title_gen if title_gen else False
     
     # if contains_evaluation:
-    data_path = _results_path_with_redirect(
+    DATA = _load_pickle_with_redirect(
         f'I001_Results/DATA_PICK_{sim_num:03d}_A2.pkl')
-    if data_path is None:
+    if DATA is None:
         raise FileNotFoundError(
             f'DATA_PICK_{sim_num:03d}_A2.pkl is missing locally and in AAA_fwd')
-    with open(data_path, "rb") as f:
-        DATA = pickle.load(f)
 
-    obj_path = _results_path_with_redirect(
-        f'I001_Results/OBJ_files/SIM_{sim_num:03d}.json')
-    if obj_path is None:
+    DATA_J = _load_simulation_json(sim_num)
+    if DATA_J is None:
         raise FileNotFoundError(
             f'OBJ_files/SIM_{sim_num:03d}.json is missing locally and in AAA_fwd')
-    with open(obj_path, 'r') as file:
-        DATA_J = json.load(file)
 
     # --- load mesh metadata used by configurable frame titles ---
     _mesh_file = DATA_J.get('input_name', '')
@@ -2508,6 +2589,13 @@ def concatenate_multiple_images_for_sim(sim_num,T, num_workers=30, frames_format
         _geometry = _mesh_info.get('geometry', {})
         porosity = _geometry.get('porosity')
         mesh_kind = _geometry.get('mesh_kind')
+    else:
+        _lite_metadata = f'I001_Results/LITE/SIM_{sim_num:03d}/metadata.json'
+        if os.path.exists(_lite_metadata):
+            with open(_lite_metadata) as _f:
+                _lattice = json.load(_f).get('lattice', {})
+            porosity = _lattice.get('porosity')
+            mesh_kind = _lattice.get('mesh_kind')
 
     foam_shape_labels = {
         'hexagonal_packing': 'Hexagonal packed foam',

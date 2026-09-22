@@ -680,8 +680,34 @@ def _write_eig_json(sim_num, results):
     return out_path
 
 
+def _write_eig_lite(sim_num, results, dof_labels):
+    """Store only the smallest mode in compressed, array-native form."""
+    out_dir = 'I001_Results/LITE/SIM_{:03d}'.format(sim_num)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'mode0.npz')
+    temporary = out_path + '.tmp'
+    vectors = np.stack([
+        np.asarray(entry['eigenvectors'])[:, 0] for entry in results
+    ]).astype(np.float32)
+    with open(temporary, 'wb') as stream:
+        np.savez_compressed(
+            stream,
+            t=np.asarray([entry['time'] for entry in results], dtype=np.float64),
+            matrix_index=np.asarray(
+                [entry['matrix_index'] for entry in results], dtype=np.int64),
+            eigenvalue=np.asarray(
+                [entry['eigenvalues'][0] for entry in results], dtype=np.float64),
+            eigenvector=vectors,
+            dof_labels=np.asarray(dof_labels, dtype=np.int64),
+        )
+    os.replace(temporary, out_path)
+    print('Wrote compressed smallest eigenmode to {}'.format(out_path))
+    return out_path
+
+
 def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
-        n_eigenvalues=20, n_workers=None, return_eigenvectors=False):
+        n_eigenvalues=20, n_workers=None, return_eigenvectors=False,
+        lite_output=False):
     """Full pipeline for SIM_{sim_num}: build the replay job, run it, parse
     every stiffness matrix, and write
     I001_Results/DATA_PICK_{sim_num}_EIG.json with
@@ -732,9 +758,14 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
         raise RuntimeError('No stiffness matrices were produced by {} - see '
                            '{}/{}.dat'.format(eig_job, sim_dir, eig_job))
 
-    _write_eig_json(sim_num, results)
-    if return_eigenvectors:
-        _write_eig_vectors_pkl(sim_num, results, dof_labels)
+    if lite_output:
+        if not return_eigenvectors:
+            raise ValueError('lite eigen output requires return_eigenvectors=True')
+        _write_eig_lite(sim_num, results, dof_labels)
+    else:
+        _write_eig_json(sim_num, results)
+        if return_eigenvectors:
+            _write_eig_vectors_pkl(sim_num, results, dof_labels)
     return results
 
 
@@ -952,7 +983,9 @@ if __name__ == '__main__':
     import sys
     do_element = '--element' in sys.argv[1:]
     do_salvage = '--salvage' in sys.argv[1:]
-    args = [a for a in sys.argv[1:] if a not in ('--salvage', '--element')]
+    do_lite = '--lite' in sys.argv[1:]
+    args = [a for a in sys.argv[1:]
+            if a not in ('--salvage', '--element', '--lite')]
     sim = int(args[0])
     if do_element and do_salvage:
         workers = int(args[1]) if len(args) > 1 else None
@@ -974,9 +1007,10 @@ if __name__ == '__main__':
         n_seg = int(args[1]) if len(args) > 1 else 100
         until_frac = float(args[2]) if len(args) > 2 else 1.0
         n_cpus = int(args[3]) if len(args) > 3 else 1
-        n_eig = int(args[4]) if len(args) > 4 else 20
+        n_eig = int(args[4]) if len(args) > 4 else (1 if do_lite else 20)
         workers = int(args[5]) if len(args) > 5 else None
         return_vectors = bool(int(args[6])) if len(args) > 6 else False
         run(sim, n_segments=n_seg, until=until_frac, cpus=n_cpus,
             n_eigenvalues=n_eig, n_workers=workers,
-            return_eigenvectors=return_vectors)
+            return_eigenvectors=(True if do_lite else return_vectors),
+            lite_output=do_lite)
