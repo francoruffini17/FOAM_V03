@@ -794,7 +794,7 @@ def _generator_from_mesh_payload(payload: dict):
     """Create a lightweight generator object from saved mesh geometry."""
     mesh_kind = payload.get("mesh_kind")
     geometry = payload.get("geometry", {})
-    if mesh_kind == "random":
+    if mesh_kind in ("random", "snap_through"):
         gen = object.__new__(RandomMeshGenerator)
         gen.hole_radii = np.asarray(geometry.get("hole_radii", []), dtype=float)
         gen.min_hole_radius = float(np.min(gen.hole_radii)) if len(gen.hole_radii) else 0.0
@@ -849,7 +849,7 @@ def _extended_centers_from_payload(
     extra_rows_top: int = 0,
     extend_random: bool = True,
 ) -> np.ndarray:
-    if payload.get("mesh_kind") == "random":
+    if payload.get("mesh_kind") in ("random", "snap_through"):
         if extend_random and len(generator.hole_centers) > 0:
             return generator.compute_extended_hole_centers_random()
         return generator.hole_centers.copy()

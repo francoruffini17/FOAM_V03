@@ -15,6 +15,7 @@ import csv
 import gzip
 import os
 import sys
+import traceback
 from multiprocessing import Pool, cpu_count
 
 from odbAccess import openOdb
@@ -37,11 +38,20 @@ STRESS_FIELDS = set(('S11', 'S22', 'S12', 'S21'))
 
 
 def _clean_groups(groups):
-    return set(str(group).strip().upper() for group in groups)
+    # Abaqus can expose a set membership as None in a partially completed ODB.
+    return set(str(group).strip().upper() for group in (groups or ()))
 
 
 def _history_values(output):
-    data = list(output.data)
+    raw_data = output.data
+    # HistoryOutput.data is documented as a sequence, but Abaqus returns None
+    # for histories that were registered and never populated (for example when
+    # a later analysis step aborts before its first converged increment).
+    if raw_data is None:
+        return None
+    data = list(raw_data)
+    if not data:
+        return None
     return [float(pair[0]) for pair in data], [float(pair[1]) for pair in data]
 
 
@@ -73,6 +83,7 @@ def extract_one(task):
         writer.writerow([FORMAT])
         canonical_times = None
         written = 0
+        skipped_unavailable = 0
         element_occurrence = {}
 
         for region_name, region in step.historyRegions.items():
@@ -95,7 +106,11 @@ def extract_one(task):
                         row_kind = 'REF'
                     if row_kind is None:
                         continue
-                    times, values = _history_values(output)
+                    history = _history_values(output)
+                    if history is None:
+                        skipped_unavailable += 1
+                        continue
+                    times, values = history
                     if canonical_times is None:
                         canonical_times = times
                     elif not _same_times(canonical_times, times):
@@ -116,7 +131,11 @@ def extract_one(task):
                     field = str(field).strip().upper()
                     if field not in STRESS_FIELDS:
                         continue
-                    times, values = _history_values(output)
+                    history = _history_values(output)
+                    if history is None:
+                        skipped_unavailable += 1
+                        continue
+                    times, values = history
                     if canonical_times is None:
                         canonical_times = times
                     elif not _same_times(canonical_times, times):
@@ -134,6 +153,9 @@ def extract_one(task):
             os.remove(output_path)
         os.rename(temporary_path, output_path)
         print('{}: wrote {} filtered histories to {}'.format(job, written, output_path))
+        if skipped_unavailable:
+            print('{}: skipped {} unavailable/empty histories from the partial ODB'.format(
+                job, skipped_unavailable), file=sys.stderr)
         if delete_odb:
             odb.close()
             odb = None
@@ -141,6 +163,7 @@ def extract_one(task):
         return 0
     except Exception as exc:
         print('{}: lite extraction failed: {}'.format(job, exc), file=sys.stderr)
+        traceback.print_exc()
         return 1
     finally:
         if stream is not None:
