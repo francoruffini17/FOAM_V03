@@ -106,6 +106,7 @@ for _v in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigsh
+from scipy.optimize import linear_sum_assignment
 
 
 def _remove_path(p):
@@ -203,13 +204,14 @@ def _matrix_step_lines(label, boundary_lines, element_by_element=False):
 
 
 def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1',
-                     n_segments=100, until=1.0, element_by_element=False):
+                     n_segments=100, until=1.0, element_by_element=False,
+                     late_start=None, late_refine=1):
     """Build the standalone replay input deck described in the module
     docstring. Returns the list of Step-1 step times at which a stiffness
     matrix is generated (first entry 0.0 = end of Step-0). Abaqus names the
     .mtx files JOB_STIF{job step number}.mtx; the matrix step for segment k
     is job step 2 + 2k (job step 1 is Step-0, then matrix/segment steps
-    alternate), so t = ((index - 2) / 2) * (period / n_segments).
+    alternate). The returned schedule gives the exact matrix times.
     """
     with open(inp_path) as f:
         lines = [l.rstrip('\n') for l in f.readlines()]
@@ -250,31 +252,42 @@ def build_replay_inp(inp_path, out_path, step0_name='Step-0', step1_name='Step-1
 
     boundary_lines = extract_boundary_lines(inp_path, step1_name)
 
+    if late_refine < 1 or int(late_refine) != late_refine:
+        raise ValueError('late_refine must be a positive integer')
+    if late_start is not None and not 0.0 <= late_start < 1.0:
+        raise ValueError('late_start must be in [0, 1)')
     n_run = int(round(n_segments * until))
     if not 1 <= n_run <= n_segments:
         raise ValueError('until={} gives no segments to run'.format(until))
-    dt = period / n_segments
+    boundaries = [0.0]
+    for base_index in range(n_run):
+        left = base_index / n_segments
+        subdivisions = (int(late_refine) if late_start is not None
+                        and left >= late_start - 1e-12 else 1)
+        boundaries.extend((base_index + part / subdivisions) / n_segments
+                          for part in range(1, subdivisions + 1))
+    schedule = [fraction * period for fraction in boundaries]
 
     out = list(model_lines)
     out.append('** ---- replay job written by A001_functions/stiffness_eigen.py ----')
     out.extend(step0_lines)
 
-    schedule = [0.0]                # first matrix = state at end of Step-0
+    # First matrix = state at end of Step-0.
     out.extend(_matrix_step_lines(0, boundary_lines, element_by_element))
 
-    for k in range(1, n_run + 1):
+    for k in range(1, len(schedule)):
+        dt = schedule[k] - schedule[k - 1]
         name = 'EIGSEG-{}'.format(k)
         seg_step = re.sub(r'name=[^,]+', 'name=' + name, step_line)
         out.append(seg_step)
         out.append(procedure_line)
         out.append('{:g}, {:g}, {:g}, {:g}'.format(min(dt, dt_max), dt, dt_min, dt_max))
         out.append('*Boundary, op=NEW')
-        factor = float(k) / n_segments
+        factor = boundaries[k]
         out.extend(_scaled_boundary_line(l, factor) for l in boundary_lines)
         out.append('*End Step')
 
         out.extend(_matrix_step_lines(k, boundary_lines, element_by_element))
-        schedule.append(k * dt)
 
     with open(out_path, 'w') as f:
         f.write('\n'.join(out) + '\n')
@@ -529,7 +542,8 @@ def _eigen_worker(args):
 
 
 def _extract_eigenvalues(mtx_files, dt, n_eigenvalues=20, n_workers=None,
-                         delete_after=False, return_eigenvectors=False):
+                         delete_after=False, return_eigenvectors=False,
+                         matrix_times=None):
     """Run parse + eigsh over the given .mtx files with a process pool and
     return the results list sorted by time. Each file is deleted right after
     its eigenvalues are extracted when delete_after=True (the files are
@@ -544,7 +558,8 @@ def _extract_eigenvalues(mtx_files, dt, n_eigenvalues=20, n_workers=None,
 
     def _collect(idx, eigvals, eigvecs=None, labels=None):
         nonlocal dof_labels
-        t = _mtx_index_to_time(idx, dt)
+        t = (matrix_times.get(idx) if matrix_times is not None
+             else _mtx_index_to_time(idx, dt))
         if t is None:
             print('WARNING: unexpected matrix step number {} - skipping'.format(idx))
             return
@@ -681,7 +696,7 @@ def _write_eig_json(sim_num, results):
 
 
 def _write_eig_lite(sim_num, results, dof_labels):
-    """Store only the smallest mode in compressed, array-native form."""
+    """Store the first returned near-zero mode for the video loader."""
     out_dir = 'I001_Results/LITE/SIM_{:03d}'.format(sim_num)
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, 'mode0.npz')
@@ -705,9 +720,64 @@ def _write_eig_lite(sim_num, results, dof_labels):
     return out_path
 
 
+def _write_eig_spectrum_lite(sim_num, results):
+    """Save nearby eigenvalues and continuity of their modes across samples.
+
+    The eigensolver uses shift-invert at zero, so these are the eigenvalues
+    nearest zero, not necessarily the algebraically smallest eigenvalues.
+    """
+    values = np.asarray([entry['eigenvalues'] for entry in results], dtype=np.float64)
+    vectors = [np.asarray(entry['eigenvectors'], dtype=np.float32)
+               for entry in results]
+    overlaps = np.empty((len(results) - 1, values.shape[1], values.shape[1]),
+                        dtype=np.float32)
+    tracked_indices = np.empty((len(results), values.shape[1]), dtype=np.int16)
+    tracked_indices[0] = np.arange(values.shape[1])
+    tracked_overlaps = np.ones_like(tracked_indices, dtype=np.float32)
+    for i in range(1, len(results)):
+        # Absolute normalized dot products remove the arbitrary eigenvector sign.
+        previous, current = vectors[i - 1], vectors[i]
+        norm_previous = np.linalg.norm(previous, axis=0)
+        norm_current = np.linalg.norm(current, axis=0)
+        numerator = np.abs(previous.T @ current)
+        denominator = norm_previous[:, None] * norm_current[None, :]
+        overlaps[i - 1] = np.divide(numerator, denominator,
+                                    out=np.zeros_like(numerator), where=denominator > 0)
+        rows, columns = linear_sum_assignment(-overlaps[i - 1])
+        assignment = np.empty(values.shape[1], dtype=np.int16)
+        assignment[rows] = columns
+        tracked_indices[i] = assignment[tracked_indices[i - 1]]
+        tracked_overlaps[i] = overlaps[i - 1, tracked_indices[i - 1],
+                                       tracked_indices[i]]
+
+    out_dir = 'I001_Results/LITE/SIM_{:03d}'.format(sim_num)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'spectrum.npz')
+    temporary = out_path + '.tmp'
+    with open(temporary, 'wb') as stream:
+        np.savez_compressed(
+            stream,
+            t=np.asarray([entry['time'] for entry in results], dtype=np.float64),
+            matrix_index=np.asarray([entry['matrix_index'] for entry in results],
+                                    dtype=np.int64),
+            eigenvalues=values,
+            mode_overlap=overlaps,
+            tracked_indices=tracked_indices,
+            tracked_eigenvalues=values[np.arange(len(results))[:, None],
+                                       tracked_indices],
+            tracked_overlaps=tracked_overlaps,
+            tracked_index=tracked_indices[:, 0],
+            tracked_eigenvalue=values[np.arange(len(results)), tracked_indices[:, 0]],
+            tracked_overlap=tracked_overlaps[:, 0],
+        )
+    os.replace(temporary, out_path)
+    print('Wrote nearby eigenvalue spectrum to {}'.format(out_path))
+    return out_path
+
+
 def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
         n_eigenvalues=20, n_workers=None, return_eigenvectors=False,
-        lite_output=False):
+        lite_output=False, late_start=None, late_refine=1):
     """Full pipeline for SIM_{sim_num}: build the replay job, run it, parse
     every stiffness matrix, and write
     I001_Results/DATA_PICK_{sim_num}_EIG.json with
@@ -722,8 +792,11 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
     eig_inp = '{}/{}.inp'.format(sim_dir, eig_job)
     abq_cmd = os.environ.get('ABQ_CMD', 'abq')
 
-    schedule = build_replay_inp(inp_path, eig_inp, n_segments=n_segments, until=until)
+    schedule = build_replay_inp(inp_path, eig_inp, n_segments=n_segments,
+                                until=until, late_start=late_start,
+                                late_refine=late_refine)
     dt = schedule[1] if len(schedule) > 1 else 0.0
+    matrix_times = {2 + 2 * index: value for index, value in enumerate(schedule)}
 
     # remove stale outputs of a previous attempt so old .mtx files are not
     # mistaken for results of this run
@@ -747,7 +820,7 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
     results, dof_labels = _extract_eigenvalues(
         mtx_files, dt, n_eigenvalues=n_eigenvalues,
         n_workers=n_workers, delete_after=not keep_files,
-        return_eigenvectors=return_eigenvectors)
+        return_eigenvectors=return_eigenvectors, matrix_times=matrix_times)
 
     if not keep_files:
         for p in glob.glob('{}/{}*'.format(sim_dir, eig_job)):
@@ -762,6 +835,8 @@ def run(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
         if not return_eigenvectors:
             raise ValueError('lite eigen output requires return_eigenvectors=True')
         _write_eig_lite(sim_num, results, dof_labels)
+        if n_eigenvalues > 1:
+            _write_eig_spectrum_lite(sim_num, results)
     else:
         _write_eig_json(sim_num, results)
         if return_eigenvectors:
@@ -823,22 +898,31 @@ def run_element(sim_num, n_segments=100, until=1.0, keep_files=False, cpus=1,
 
 
 def _segment_dt_from_replay_inp(eig_inp):
-    """Read the segment duration back out of an existing replay .inp: the
-    *Static data line of step EIGSEG-1 has the segment period as its second
-    field."""
+    """Read the first segment duration from an existing replay input."""
+    return _schedule_from_replay_inp(eig_inp)[1]
+
+
+def _schedule_from_replay_inp(eig_inp):
+    """Recover the exact matrix times, including any refined late segments."""
     with open(eig_inp) as f:
         lines = [l.rstrip('\n') for l in f.readlines()]
-    seg = next(i for i, l in enumerate(lines)
-               if l.lstrip().lower().startswith('*step') and 'name=EIGSEG-1,' in l.replace(' ', '') + ',')
-    static_kw = next(i for i in range(seg, len(lines))
-                     if lines[i].lstrip().lower().startswith('*static'))
-    data = next(lines[i] for i in range(static_kw + 1, len(lines))
-                if lines[i].strip() and not lines[i].lstrip().startswith('*'))
-    return float(data.split(',')[1])
+    schedule = [0.0]
+    for i, line in enumerate(lines):
+        if not (line.lstrip().lower().startswith('*step')
+                and 'name=EIGSEG-' in line.replace(' ', '')):
+            continue
+        procedure = next(j for j in range(i + 1, len(lines))
+                         if lines[j].lstrip().lower().startswith(('*static', '*dynamic')))
+        data = next(lines[j] for j in range(procedure + 1, len(lines))
+                    if lines[j].strip() and not lines[j].lstrip().startswith('*'))
+        schedule.append(schedule[-1] + float(data.split(',')[1]))
+    if len(schedule) < 2:
+        raise ValueError('No EIGSEG steps found in {}'.format(eig_inp))
+    return schedule
 
 
 def salvage(sim_num, n_eigenvalues=20, n_workers=None, keep_files=True,
-            return_eigenvectors=False):
+            return_eigenvectors=False, lite_output=False):
     """Extract eigenvalues from the .mtx files an earlier (possibly failed or
     crashed) replay run left in E001_Simulations/SIM_{sim_num}/ - or in its
     EIGBAK/ backup subdirectory - without re-running Abaqus. Writes the same
@@ -859,20 +943,29 @@ def salvage(sim_num, n_eigenvalues=20, n_workers=None, keep_files=True,
         raise RuntimeError('No {}_STIF*.mtx files found in {} (or EIGBAK/) - '
                            'nothing to salvage.'.format(eig_job, sim_dir))
 
-    dt = _segment_dt_from_replay_inp(eig_inp)
+    schedule = _schedule_from_replay_inp(eig_inp)
+    dt = schedule[1]
+    matrix_times = {2 + 2 * index: value for index, value in enumerate(schedule)}
     print('Salvaging {} stiffness matrices from {} (segment dt = {:g})'.format(
         len(mtx_files), sim_dir, dt))
 
     results, dof_labels = _extract_eigenvalues(
         mtx_files, dt, n_eigenvalues=n_eigenvalues,
         n_workers=n_workers, delete_after=not keep_files,
-        return_eigenvectors=return_eigenvectors)
+        return_eigenvectors=return_eigenvectors, matrix_times=matrix_times)
     if not results:
         raise RuntimeError('No eigenvalues could be extracted from the '
                            'salvaged matrices.')
-    _write_eig_json(sim_num, results)
-    if return_eigenvectors:
-        _write_eig_vectors_pkl(sim_num, results, dof_labels)
+    if lite_output:
+        if not return_eigenvectors:
+            raise ValueError('lite eigen output requires return_eigenvectors=True')
+        _write_eig_lite(sim_num, results, dof_labels)
+        if n_eigenvalues > 1:
+            _write_eig_spectrum_lite(sim_num, results)
+    else:
+        _write_eig_json(sim_num, results)
+        if return_eigenvectors:
+            _write_eig_vectors_pkl(sim_num, results, dof_labels)
     return results
 
 
@@ -984,8 +1077,18 @@ if __name__ == '__main__':
     do_element = '--element' in sys.argv[1:]
     do_salvage = '--salvage' in sys.argv[1:]
     do_lite = '--lite' in sys.argv[1:]
+    late_start = None
+    late_refine = 1
+    if '--late-start' in sys.argv:
+        late_start = float(sys.argv[sys.argv.index('--late-start') + 1])
+    if '--late-refine' in sys.argv:
+        late_refine = int(sys.argv[sys.argv.index('--late-refine') + 1])
     args = [a for a in sys.argv[1:]
             if a not in ('--salvage', '--element', '--lite')]
+    for flag in ('--late-start', '--late-refine'):
+        if flag in args:
+            index = args.index(flag)
+            del args[index:index + 2]
     sim = int(args[0])
     if do_element and do_salvage:
         workers = int(args[1]) if len(args) > 1 else None
@@ -1002,7 +1105,8 @@ if __name__ == '__main__':
         workers = int(args[2]) if len(args) > 2 else None
         return_vectors = bool(int(args[3])) if len(args) > 3 else False
         salvage(sim, n_eigenvalues=n_eig, n_workers=workers,
-                return_eigenvectors=return_vectors)
+                return_eigenvectors=(True if do_lite else return_vectors),
+                lite_output=do_lite)
     else:
         n_seg = int(args[1]) if len(args) > 1 else 100
         until_frac = float(args[2]) if len(args) > 2 else 1.0
@@ -1013,4 +1117,5 @@ if __name__ == '__main__':
         run(sim, n_segments=n_seg, until=until_frac, cpus=n_cpus,
             n_eigenvalues=n_eig, n_workers=workers,
             return_eigenvectors=(True if do_lite else return_vectors),
-            lite_output=do_lite)
+            lite_output=do_lite, late_start=late_start,
+            late_refine=late_refine)
