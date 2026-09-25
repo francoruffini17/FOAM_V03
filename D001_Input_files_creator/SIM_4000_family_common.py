@@ -26,6 +26,7 @@ class FamilySpec:
     description: str
     output_frames: int = 200
     output_interval: float = 0.005
+    lite_only: bool = False
 
 
 def _prepare_simulation_directory(path, replace):
@@ -83,10 +84,11 @@ def _build_object(sim_num, pressure, spec, sim_path):
         time_interval_out=spec.output_interval,
         frequ_out=100,
         out_frames=spec.output_frames,
+        field_output=not spec.lite_only,
         restart_line='',
-        ELE_OUTPUT='S11, S12, S22',
-        NODES_OUTPUT='COOR1, COOR2',
-        additional_outputs=["""** HISTORY OUTPUT: H-Set-y-negative
+        ELE_OUTPUT='' if spec.lite_only else 'S11, S12, S22',
+        NODES_OUTPUT='' if spec.lite_only else 'COOR1, COOR2',
+        additional_outputs=[] if spec.lite_only else ["""** HISTORY OUTPUT: H-Set-y-negative
     *Output, history, time interval=0.005
     *Node Output, nset=Set-y-negative
     RF2,
@@ -111,10 +113,11 @@ def _build_object(sim_num, pressure, spec, sim_path):
         time_interval_out=spec.output_interval,
         frequ_out=100,
         out_frames=spec.output_frames,
+        field_output=not spec.lite_only,
         restart_line='',
         ELE_OUTPUT='S11, S12, S22',
         NODES_OUTPUT='COOR1, COOR2',
-        additional_outputs=["""** HISTORY OUTPUT: H-Set-y-negative
+        additional_outputs=[] if spec.lite_only else ["""** HISTORY OUTPUT: H-Set-y-negative
     *Output, history, time interval=0.005
     *Node Output, nset=Set-y-negative
     RF2,

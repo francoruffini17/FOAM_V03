@@ -33,6 +33,7 @@ class StepData:
     Pressure_BC: float = None
 
     out_frames: int = None
+    field_output: bool = True
     time_interval_out: float = None
     frequ_out: int = None
     restart_line: str = ""
@@ -278,9 +279,10 @@ def write_step_block(file,
         file.write("** \n")
 
     # Field output
-    file.write("** FIELD OUTPUT: F-Output-1\n")
-    file.write("** \n")
-    file.write(f"*Output, field, variable=PRESELECT, number interval={step.out_frames}\n")
+    if step.field_output:
+        file.write("** FIELD OUTPUT: F-Output-1\n")
+        file.write("** \n")
+        file.write(f"*Output, field, variable=PRESELECT, number interval={step.out_frames}\n")
 
     # -------------------------------------------------------------------------
     # HISTORY OUTPUTS: RF / RM and U
